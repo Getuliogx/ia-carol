@@ -25,7 +25,7 @@
           <option value="angry">Raivosa</option>
           <option value="sarcastic">Sarcástica</option>
           <option value="savage">Debochada / Mal-humorada</option>
-          <option value="sensual">Sensual leve</option>
+          <option value="sensual">Sensual pesado</option>
           <option value="cute">Fofa</option>
           <option value="sad">Triste / Dramática</option>
           <option value="serious">Séria</option>
@@ -49,7 +49,7 @@
         </select>
 
         <label>Cooldown entre falas</label>
-        <input id="cooldownSeconds" type="number" min="1" max="120" value="8" />
+        <input id="cooldownSeconds" type="number" min="1" max="120" value="0" />
 
         <div class="checks">
           <label><input type="checkbox" id="speakEnabled" checked /> Falar em voz</label>
@@ -85,7 +85,7 @@
       <div class="card">
         <h2>Teste</h2>
         <input id="testUser" placeholder="Nome" value="Chat" />
-        <textarea id="testMessage">faz uma resposta misturando sarcasmo, raiva leve e deboche</textarea>
+        <textarea id="testMessage">faz uma resposta misturando sarcasmo, raiva, deboche e sensual pesado</textarea>
         <button id="sendTest">Enviar teste</button>
         <p class="mini">URL para OBS:</p>
         <code id="obsUrl"></code>

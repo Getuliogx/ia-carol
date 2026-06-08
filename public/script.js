@@ -49,7 +49,7 @@ function emotionVoiceParams(emotion) {
     angry: { rate: 1.22, pitch: 0.82, volume: 1 },
     sarcastic: { rate: 0.95, pitch: 0.9, volume: 1 },
     savage: { rate: 1.08, pitch: 0.85, volume: 1 },
-    sensual: { rate: 0.78, pitch: 0.75, volume: 0.9 },
+    sensual: { rate: 0.68, pitch: 0.7, volume: 0.95 },
     cute: { rate: 1.08, pitch: 1.25, volume: 1 },
     sad: { rate: 0.78, pitch: 0.8, volume: 0.75 },
     calm: { rate: 0.85, pitch: 0.92, volume: 0.85 },
@@ -96,7 +96,7 @@ function readControls() {
     speakEnabled: Boolean($('speakEnabled')?.checked),
     listenAllChat: Boolean($('listenAllChat')?.checked),
     replyInChat: Boolean($('replyInChat')?.checked),
-    cooldownSeconds: Number($('cooldownSeconds')?.value || 8)
+    cooldownSeconds: Number($('cooldownSeconds')?.value ?? 0)
   };
 }
 
@@ -108,7 +108,7 @@ function applyState(s) {
   if ($('speakEnabled')) $('speakEnabled').checked = Boolean(currentState.speakEnabled);
   if ($('listenAllChat')) $('listenAllChat').checked = Boolean(currentState.listenAllChat);
   if ($('replyInChat')) $('replyInChat').checked = Boolean(currentState.replyInChat);
-  if ($('cooldownSeconds')) $('cooldownSeconds').value = currentState.cooldownSeconds || 8;
+  if ($('cooldownSeconds')) $('cooldownSeconds').value = currentState.cooldownSeconds ?? 0;
   if ($('gameContext')) $('gameContext').value = currentState.gameContext || '';
   if ($('captureContext')) $('captureContext').value = currentState.captureContext || '';
 }
@@ -141,7 +141,10 @@ socket.on('chat-message', msg => logLine(`<strong>[${msg.source}] ${msg.user}</s
 socket.on('streamer-speech', e => logLine(`<strong>[streamer]</strong>: ${e.text}`));
 socket.on('game-event', e => logLine(`<strong>[jogo/captura]</strong>: ${e.text}`));
 socket.on('bot-reply', payload => {
-  if ($('bubble')) $('bubble').textContent = payload.reply;
+  if ($('bubble')) {
+    $('bubble').textContent = payload.showBotText ? payload.reply : '';
+    $('bubble').style.display = payload.showBotText ? 'block' : 'none';
+  }
   logLine(`<span class="reply"><strong>BOT</strong>: ${payload.reply}</span>`);
   if (payload.speakEnabled !== false) speak(payload.reply, payload);
 });
@@ -174,6 +177,7 @@ window.addEventListener('load', async () => {
   });
 
   if (isObs) {
+    if ($('bubble')) $('bubble').style.display = 'none';
     document.addEventListener('click', () => speechSynthesis.resume(), { once: true });
   }
 });

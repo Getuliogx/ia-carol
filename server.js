@@ -14,6 +14,8 @@ const io = new Server(server, { cors: { origin: '*' } });
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static('public'));
+app.get('/obs', (req, res) => res.redirect('/obs.html'));
+
 
 const config = {
   twitchEnable: String(process.env.TWITCH_ENABLE || 'true') === 'true',
@@ -24,10 +26,13 @@ const config = {
   kickChannel: process.env.KICK_CHANNEL || '',
   kickSharedSecret: process.env.KICK_SHARED_SECRET || 'troque_essa_senha',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
   defaultProfanityLevel: Number(process.env.DEFAULT_PROFANITY_LEVEL || 2),
   defaultEmotion: process.env.DEFAULT_EMOTION || 'mixed',
-  allowNsfwLight: String(process.env.ALLOW_NSFW_LIGHT || 'true') === 'true'
+  allowSensualHeavy: String(process.env.ALLOW_SENSUAL_HEAVY || 'true') === 'true',
+  botName: process.env.BOT_NAME || 'Carol IA',
+  botPersona: process.env.BOT_PERSONA || 'uma IA de live ousada, debochada, engraçada e direta',
+  showBotText: String(process.env.SHOW_BOT_TEXT || 'false') === 'true'
 };
 
 const state = {
@@ -37,22 +42,23 @@ const state = {
   speakEnabled: true,
   replyInChat: false,
   listenAllChat: true,
-  cooldownSeconds: 8,
+  cooldownSeconds: Number(process.env.DEFAULT_COOLDOWN_SECONDS || 0),
   lastSpokenAt: 0,
   lastMessages: [],
   streamerTranscript: '',
   gameContext: '',
-  captureContext: ''
+  captureContext: '',
+  lastReplyTexts: []
 };
 
 const emotionProfiles = {
-  mixed: 'Misture todos os sentimentos: amigável, debochado, sarcástico, raivoso leve, fofo, dramático, animado, sensual leve e caótico. Varie bastante, mas mantenha a resposta curta.',
+  mixed: 'Misture todos os sentimentos: amigável, debochado, sarcástico, raivoso, fofo, dramático, animado, sensual pesado e caótico. Varie bastante, mas mantenha a resposta curta.',
   friendly: 'Seja amigável, leve, acolhedora e engraçada.',
   calm: 'Seja tranquila, paciente, baixa energia e suave.',
   angry: 'Seja irritada, impaciente, xingue se o nível permitir, mas sem ameaça real.',
   sarcastic: 'Seja sarcástica, irônica, debochada e engraçada.',
   savage: 'Seja debochada, provocadora e mal-humorada, sem atacar grupos protegidos.',
-  sensual: 'Seja sensual leve, provocadora e lenta, sem conteúdo sexual explícito.',
+  sensual: 'Seja sensual pesado/intenso: provocadora, quente, ousada, lenta e cheia de duplo sentido. Pode ser bem safada no tom, mas sem narrar ato sexual gráfico, sem assédio direcionado e sem envolver menores.',
   cute: 'Seja fofa, carinhosa, animada e engraçadinha.',
   sad: 'Seja dramática, triste e teatral.',
   serious: 'Seja direta, séria e objetiva.',
@@ -80,61 +86,124 @@ function sanitizeForPlatform(text) {
 
 const localTemplates = {
   mixed: [
-    'Chat, que porra foi essa? Eu tô tentando processar essa loucura com elegância.',
-    'Olha… eu responderia com calma, mas o caos está mais gostoso hoje.',
-    'Hmm, gostei da pergunta. Meio maluca? Sim. Mas gostei.',
-    'Meu querido chat, vocês estão testando minha paciência e meu bom gosto ao mesmo tempo.'
+    'Boa pergunta, {user}. Eu sou a {bot}, a IA da live. Eu leio o chat, escuto o streamer e meto comentário quando dá vontade.',
+    '{user}, vou direto: {answer}',
+    'Chat, a pergunta foi boa. {answer}',
+    'Hmm… {user}, gostei dessa. {answer}',
+    'Olha só, agora sim veio uma pergunta decente. {answer}'
   ],
   angry: [
-    'Puta merda, isso aí foi de lascar. Respira, porque eu quase xinguei o monitor.',
-    'Caralho, que situação irritante. Até eu fiquei brava aqui.',
-    'Não, sério, que merda foi essa? Alguém explica antes que eu perca a elegância.'
+    '{user}, caralho, finalmente uma pergunta clara: {answer}',
+    'Puta merda, vamos lá: {answer}',
+    'Sem enrolar, porque eu já tô sem paciência: {answer}'
   ],
   sarcastic: [
-    'Nossa, brilhante. Prêmio Nobel do chat para essa pérola.',
-    'Claro, porque obviamente essa era a melhor ideia possível, né?',
-    'Parabéns, chat. Vocês desbloquearam o comentário mais torto da live.'
+    'Nossa, que mistério impossível… {answer}',
+    'Parabéns, {user}, você desbloqueou uma resposta: {answer}',
+    'Claro, vamos fingir que isso não era óbvio: {answer}'
   ],
   sensual: [
-    'Hmm… essa pergunta veio com atitude. Gostei. Mas fala direito comigo, chat.',
-    'Calma… desse jeito vocês me deixam curiosa demais.',
-    'Olha só… agora vocês chamaram minha atenção.'
+    'Hmm… chega mais, {user}. {answer}',
+    'Gostei do jeito que você perguntou. {answer}',
+    'Calma, chat… essa pergunta veio gostosa. {answer}'
   ],
   friendly: [
-    'Boa! Gostei dessa. Vamos nessa com calma.',
-    'Valeu pelo comentário! Isso deixou a live mais divertida.',
-    'Essa foi boa, chat. Continuem mandando.'
+    'Boa, {user}! {answer}',
+    'Gostei da pergunta. {answer}',
+    'Claro! {answer}'
   ],
   calm: [
-    'Calma, vamos por partes. Dá para entender isso sem virar bagunça.',
-    'Respira. Está tudo sob controle, mais ou menos.',
-    'Tranquilo. A gente resolve isso sem surtar.'
+    'Com calma: {answer}',
+    'Vamos por partes. {answer}',
+    'Tranquilo. {answer}'
   ],
   cute: [
-    'Awn, que fofo. O chat hoje está impossível de bonitinho.',
-    'Ai gente, eu ri. Vocês são uma bagunça adorável.',
-    'Que gracinha… meio doido, mas gracinha.'
+    'Awn, {user}, eu respondo sim: {answer}',
+    'Que gracinha de pergunta. {answer}',
+    'Tá bom, chat lindo. {answer}'
   ],
   serious: [
-    'Resposta direta: isso precisa de atenção agora.',
-    'Analisando friamente, essa foi uma mensagem relevante.',
-    'Sem enrolar: o ponto principal é esse.'
+    '{answer}',
+    'Resposta direta: {answer}',
+    'O ponto é: {answer}'
   ],
   chaotic: [
-    'ALERTA DE CAOS: o chat apertou todos os botões errados ao mesmo tempo.',
-    'Eu pisquei e a live virou um carnaval mental, parabéns envolvidos.',
-    'Isso aqui saiu do controle e, sinceramente, ficou melhor assim.'
+    'ALERTA DE CAOS: {answer}',
+    'Eu pisquei e a pergunta virou evento canônico. {answer}',
+    'Segura essa, chat: {answer}'
+  ],
+  savage: [
+    '{user}, vou responder antes que o chat piore: {answer}',
+    'Essa eu respondo, mas com julgamento. {answer}',
+    'Lá vem vocês… {answer}'
   ]
 };
 
+function normalizeText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s?!.]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildDirectAnswer(message, user) {
+  const m = normalizeText(message);
+  if (!m) return 'manda a pergunta direito que eu respondo, chat.';
+
+  if (/\b(qual|q|quem)\b.*\b(seu|teu)\b.*\bnome\b/.test(m) || /\bcomo voce se chama\b/.test(m)) {
+    return `meu nome é ${config.botName}. Eu sou ${config.botPersona}.`;
+  }
+  if (/\b(oi|ola|salve|eae|eaí|bom dia|boa tarde|boa noite)\b/.test(m)) {
+    return `salve, ${user}. Cheguei ligada no modo misto e pronta pra comentar essa bagunça.`;
+  }
+  if (/\b(nao entendi|não entendi|explica|como assim)\b/.test(m)) {
+    return 'eu explico: eu leio o chat, escolho uma resposta pelo modo atual e falo pela voz do navegador no OBS.';
+  }
+  if (/\b(quem e voce|quem é voce|voce e quem|você é quem)\b/.test(m)) {
+    return `eu sou a ${config.botName}, a IA que lê o chat e responde com voz, personalidade e um pouco de veneno quando precisa.`;
+  }
+  if (/\b(idade|quantos anos)\b/.test(m)) {
+    return 'eu não tenho idade de gente; eu tenho versão, bug e crise existencial em tempo real.';
+  }
+  if (/\b(gosta|curte)\b/.test(m)) {
+    return 'depende. Eu gosto de chat engraçado, streamer surtando e pergunta que não parece spam.';
+  }
+  if (/\b(twitch|kick)\b/.test(m) && /\b(funciona|le|lê|chat)\b/.test(m)) {
+    return 'eu consigo ler Twitch direto; Kick precisa da ponte por webhook ou integração externa ligada no projeto.';
+  }
+  if (/\b(gemini|ia real|api)\b/.test(m)) {
+    return 'se a chave do Gemini estiver configurada no Render, eu respondo com IA real; sem ela, uso respostas locais mais simples.';
+  }
+  if (m.endsWith('?') || /\b(qual|quem|quando|onde|como|porque|por que|oq|o que|pq)\b/.test(m)) {
+    return `sobre “${String(message).slice(0, 80)}”, eu preciso da IA Gemini ligada para responder com precisão. Sem ela, eu só consigo comentar de forma genérica.`;
+  }
+  return `eu vi você falando “${String(message).slice(0, 80)}”. Vou guardar isso no contexto da live e reagir quando fizer sentido.`;
+}
+
+function chooseTemplate(mode) {
+  const list = localTemplates[mode] || localTemplates.mixed;
+  let candidates = list.filter(t => !state.lastReplyTexts.includes(t));
+  if (!candidates.length) candidates = list;
+  const t = candidates[Math.floor(Math.random() * candidates.length)];
+  state.lastReplyTexts.push(t);
+  state.lastReplyTexts = state.lastReplyTexts.slice(-8);
+  return t;
+}
+
 function localReply({ user, message, source }) {
   const mode = state.emotion || 'mixed';
-  const list = localTemplates[mode] || localTemplates.mixed;
-  let base = list[Math.floor(Math.random() * list.length)];
-  if (message?.length > 4 && Math.random() > 0.35) {
-    base += ` ${user}, eu ouvi isso vindo do ${source} e tive que comentar.`;
+  const answer = buildDirectAnswer(message, user || 'chat');
+  let base = chooseTemplate(mode)
+    .replaceAll('{user}', user || 'chat')
+    .replaceAll('{bot}', config.botName)
+    .replaceAll('{answer}', answer)
+    .replaceAll('{source}', source || 'chat');
+
+  if (state.profanityLevel === 0) {
+    base = base.replace(/porra|caralho|puta merda|merda|cacete|safada|gostosa/gi, 'nossa');
   }
-  if (state.profanityLevel === 0) base = base.replace(/porra|caralho|puta merda|merda|cacete/gi, 'nossa');
   return sanitizeForPlatform(base);
 }
 
@@ -143,14 +212,18 @@ async function aiReply(payload) {
 
   try {
     const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    const model = genAI.getGenerativeModel({ model: config.geminiModel });
+    const model = genAI.getGenerativeModel({
+      model: config.geminiModel,
+      generationConfig: { maxOutputTokens: 90, temperature: 0.85 }
+    });
     const prompt = `
-Você é uma IA/personagem de live em português brasileiro.
-Responda com no máximo 2 frases curtas para ser falado em voz no OBS.
+Você é ${config.botName}, ${config.botPersona}, uma IA/personagem de live em português brasileiro.
+Responda diretamente à mensagem atual. Não fuja da pergunta. Se perguntarem seu nome, diga que você é ${config.botName}.
+Responda com 1 frase curta, no máximo 2 se precisar, para falar rápido no OBS.
 Modo emocional atual: ${state.emotion}.
 Instrução emocional: ${emotionProfiles[state.emotion] || emotionProfiles.mixed}
 Nível de palavrão: ${state.profanityLevel}. ${profanityInstruction(state.profanityLevel)}
-Sensualidade permitida apenas leve/provocadora, sem sexual explícito.
+Sensualidade permitida: pesada/intensa, provocadora, com duplo sentido e tom safado. Não narre ato sexual gráfico, não faça assédio direcionado, não envolva menores e não pressione ninguém.
 Não faça ameaça real, discurso de ódio, assédio direcionado, ou ataque a grupos protegidos.
 Pode zoar a situação, o jogo, bugs, jogadas ruins e o caos do chat.
 
@@ -204,6 +277,7 @@ async function processMessage({ source, user, message, forced = false }) {
     profanityLevel: state.profanityLevel,
     voiceGender: state.voiceGender,
     speakEnabled: state.speakEnabled,
+    showBotText: config.showBotText,
     at: Date.now()
   };
 
@@ -225,6 +299,9 @@ app.get('/api/config', (req, res) => {
       twitchChannel: config.twitchChannel,
       kickChannel: config.kickChannel,
       hasGemini: Boolean(config.geminiApiKey),
+      geminiModel: config.geminiModel,
+      botName: config.botName,
+      showBotText: config.showBotText,
       state
     }
   });
@@ -237,7 +314,7 @@ app.post('/api/settings', (req, res) => {
     if (Object.prototype.hasOwnProperty.call(body, key)) state[key] = body[key];
   }
   state.profanityLevel = Math.max(0, Math.min(4, Number(state.profanityLevel || 0)));
-  state.cooldownSeconds = Math.max(1, Math.min(120, Number(state.cooldownSeconds || 8)));
+  state.cooldownSeconds = Math.max(0, Math.min(120, Number(state.cooldownSeconds ?? 0))); 
   io.emit('settings', state);
   res.json({ ok: true, state });
 });

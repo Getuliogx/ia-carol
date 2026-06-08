@@ -14,7 +14,7 @@ Ele lê chat da Twitch, recebe eventos externos/Kick por webhook, escuta microfo
 - Voz masculina/feminina pelo navegador
 - Sentimentos separados e modo padrão `Misto / Todos`
 - Níveis de palavrão 0 a 4
-- Sensual leve, sarcasmo, raiva, deboche, fofo, triste, dramático etc.
+- Sensual pesado, sarcasmo, raiva, deboche, fofo, triste, dramático etc.
 - Captura de microfone pelo navegador
 - Entrada manual para eventos do jogo/placa de captura
 - Avatar 2D com boca mexendo enquanto fala
@@ -104,3 +104,24 @@ Content-Type: application/json
 ```
 
 Isso permite ligar depois com uma ponte Kick/serviço externo sem refazer o bot.
+
+
+## Correção desta versão
+
+- Fallback local agora responde perguntas simples diretamente, como nome do bot, saudação e dúvidas sobre Gemini.
+- Respostas locais não repetem a mesma frase toda hora.
+- Se não houver `GEMINI_API_KEY`, o painel avisa que está usando respostas locais. Para respostas realmente inteligentes, coloque a chave do Gemini nas variáveis do Render.
+- Novas variáveis opcionais:
+
+```env
+BOT_NAME=Carol IA
+BOT_PERSONA=uma IA de live ousada, debochada, engraçada e direta
+```
+
+
+Atualizacao rapida:
+SHOW_BOT_TEXT=false  # nao mostra texto no OBS, so avatar e voz
+DEFAULT_COOLDOWN_SECONDS=0  # responde sem esperar cooldown
+ALLOW_SENSUAL_HEAVY=true  # modo sensual pesado ativado
+
+OBS: use /obs.html ou /obs.
