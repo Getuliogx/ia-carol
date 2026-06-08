@@ -95,6 +95,7 @@ function readControls() {
     voiceGender: $('voiceGender')?.value,
     speakEnabled: Boolean($('speakEnabled')?.checked),
     listenAllChat: Boolean($('listenAllChat')?.checked),
+    autoReplyChat: Boolean($('autoReplyChat')?.checked),
     replyInChat: Boolean($('replyInChat')?.checked),
     cooldownSeconds: Number($('cooldownSeconds')?.value ?? 0)
   };
@@ -107,6 +108,7 @@ function applyState(s) {
   if ($('voiceGender')) $('voiceGender').value = currentState.voiceGender || 'auto';
   if ($('speakEnabled')) $('speakEnabled').checked = Boolean(currentState.speakEnabled);
   if ($('listenAllChat')) $('listenAllChat').checked = Boolean(currentState.listenAllChat);
+  if ($('autoReplyChat')) $('autoReplyChat').checked = Boolean(currentState.autoReplyChat);
   if ($('replyInChat')) $('replyInChat').checked = Boolean(currentState.replyInChat);
   if ($('cooldownSeconds')) $('cooldownSeconds').value = currentState.cooldownSeconds ?? 0;
   if ($('gameContext')) $('gameContext').value = currentState.gameContext || '';
@@ -161,7 +163,7 @@ window.addEventListener('load', async () => {
       const ai = cfg.publicConfig.aiStatus;
       if (!cfg.publicConfig.hasGemini) $('status').textContent = 'Sem GEMINI_API_KEY: respostas locais';
       else if (ai?.ok) $('status').textContent = 'Gemini OK: ' + ai.lastModel;
-      else $('status').textContent = 'Gemini configurado, aguardando teste/resposta';
+      else $('status').textContent = 'Gemini configurado. Clique em Testar Gemini. Último erro: ' + (ai?.lastError || 'nenhum');
     }
   } catch {}
 
@@ -172,6 +174,13 @@ window.addEventListener('load', async () => {
   $('saveContext')?.addEventListener('click', async () => { await postJSON('/api/settings', { gameContext: $('gameContext').value, captureContext: $('captureContext').value }); logLine('<strong>Sistema</strong>: contexto salvo.'); });
   $('forceGameReply')?.addEventListener('click', async () => { await postJSON('/api/game-event', { text: `${$('gameContext').value} ${$('captureContext').value}`, forceReply: true }); });
   $('sendTest')?.addEventListener('click', async () => { await postJSON('/api/test-message', { user: $('testUser').value, message: $('testMessage').value, source: 'teste' }); });
+  $('testGemini')?.addEventListener('click', async () => {
+    try {
+      const r = await fetch('/api/gemini-test').then(r => r.json());
+      logLine(`<strong>Gemini teste</strong>: ${r.ok ? 'OK modelo ' + r.model + ' - ' + r.text : 'ERRO: ' + r.error}`);
+      if ($('status')) $('status').textContent = r.ok ? 'Gemini OK: ' + r.model : 'Gemini ERRO: ' + r.error;
+    } catch (e) { logLine(`<strong>Gemini teste</strong>: ERRO ${e.message}`); }
+  });
 
   $('startMic')?.addEventListener('click', () => {
     recognition = recognition || setupMic();

@@ -31,7 +31,8 @@ const config = {
   allowSensualHeavy: String(process.env.ALLOW_SENSUAL_HEAVY || 'true') === 'true',
   botName: process.env.BOT_NAME || 'Carol IA',
   botPersona: process.env.BOT_PERSONA || 'uma IA de live ousada, debochada, engraçada e direta',
-  showBotText: String(process.env.SHOW_BOT_TEXT || 'false') === 'true'
+  showBotText: String(process.env.SHOW_BOT_TEXT || 'false') === 'true',
+  requireGemini: String(process.env.REQUIRE_GEMINI || 'true') === 'true'
 };
 
 const state = {
@@ -41,6 +42,7 @@ const state = {
   speakEnabled: true,
   replyInChat: false,
   listenAllChat: true,
+  autoReplyChat: String(process.env.AUTO_REPLY_CHAT || 'true') === 'true',
   cooldownSeconds: Number(process.env.DEFAULT_COOLDOWN_SECONDS || 0),
   lastSpokenAt: 0,
   lastMessages: [],
@@ -260,14 +262,46 @@ async function callGeminiREST(modelName, prompt) {
   return text;
 }
 
-function candidateGeminiModels() {
+async function listGeminiModels() {
+  if (!config.geminiApiKey) return [];
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(config.geminiApiKey)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error?.message || `HTTP ${res.status}`);
+    return (data.models || [])
+      .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+      .map(m => String(m.name || '').replace(/^models\//, ''))
+      .filter(Boolean);
+  } catch (err) {
+    console.error('Erro listando modelos Gemini:', err.message);
+    state.aiStatus = { ok: false, lastError: 'Erro listando modelos: ' + err.message, lastModel: '', lastAt: Date.now() };
+    return [];
+  }
+}
+
+let cachedModels = { at: 0, list: [] };
+async function candidateGeminiModels() {
   const envModel = String(config.geminiModel || '').trim();
-  return [...new Set([
+  const preferred = [
     envModel,
     'gemini-3.5-flash',
-    'gemini-flash-latest',
-    'gemini-2.5-flash'
-  ].filter(Boolean))];
+    'gemini-3-flash',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-latest'
+  ].filter(Boolean);
+
+  if (!cachedModels.list.length || Date.now() - cachedModels.at > 10 * 60 * 1000) {
+    cachedModels = { at: Date.now(), list: await listGeminiModels() };
+  }
+  const available = cachedModels.list;
+  const ordered = [
+    ...preferred.filter(m => available.length === 0 || available.includes(m)),
+    ...available.filter(m => /flash/i.test(m)),
+    ...available
+  ];
+  return [...new Set(ordered)].filter(Boolean);
 }
 
 async function aiReply(payload) {
@@ -278,9 +312,9 @@ async function aiReply(payload) {
 
   const prompt = `
 Você é ${config.botName}, ${config.botPersona}, uma IA/personagem de live em português brasileiro.
-REGRA PRINCIPAL: responda a mensagem atual de forma direta. Não diga que precisa de Gemini. Não diga que é fallback. Não explique configuração.
+REGRA PRINCIPAL: responda SOMENTE a mensagem atual de forma direta. Não responda mensagens antigas. Não diga que precisa de Gemini. Não diga que é fallback. Não explique configuração. Se a mensagem pedir um estilo, execute o estilo pedido.
 Se perguntarem seu nome, responda que você é ${config.botName}.
-Responda com 1 frase curta, natural e boa para voz no OBS.
+Responda com 1 ou 2 frases curtas, naturais e boas para voz no OBS. Varie a estrutura da resposta, não repita bordões.
 Modo emocional atual: ${state.emotion}.
 Instrução emocional: ${emotionProfiles[state.emotion] || emotionProfiles.mixed}
 Nível de palavrão: ${state.profanityLevel}. ${profanityInstruction(state.profanityLevel)}
@@ -304,7 +338,7 @@ Mensagem atual de ${payload.user} em ${payload.source}: ${payload.message}
 Responda apenas a fala da personagem, sem aspas.`;
 
   let lastErr = null;
-  for (const modelName of candidateGeminiModels()) {
+  for (const modelName of await candidateGeminiModels()) {
     try {
       const text = await callGeminiREST(modelName, prompt);
       state.aiStatus = { ok: true, lastError: '', lastModel: modelName, lastAt: Date.now() };
@@ -317,11 +351,15 @@ Responda apenas a fala da personagem, sem aspas.`;
   }
 
   state.aiStatus = { ok: false, lastError: lastErr?.message || 'Erro desconhecido no Gemini', lastModel: config.geminiModel, lastAt: Date.now() };
+  if (config.requireGemini) {
+    return sanitizeForPlatform(`Erro no Gemini: ${state.aiStatus.lastError}. Veja os logs do Render e confira GEMINI_MODEL/GEMINI_API_KEY.`);
+  }
   return localReply(payload);
 }
 
 function shouldRespond() {
   if (!state.listenAllChat) return false;
+  if (!state.autoReplyChat) return false;
   const now = Date.now();
   if (now - state.lastSpokenAt < state.cooldownSeconds * 1000) return false;
   state.lastSpokenAt = now;
@@ -372,14 +410,15 @@ app.get('/api/config', (req, res) => {
       botName: config.botName,
       showBotText: config.showBotText,
       state,
-      aiStatus: state.aiStatus
+      aiStatus: state.aiStatus,
+      requireGemini: config.requireGemini
     }
   });
 });
 
 app.post('/api/settings', (req, res) => {
   const body = req.body || {};
-  const keys = ['emotion', 'profanityLevel', 'voiceGender', 'speakEnabled', 'replyInChat', 'listenAllChat', 'cooldownSeconds', 'gameContext', 'captureContext'];
+  const keys = ['emotion', 'profanityLevel', 'voiceGender', 'speakEnabled', 'replyInChat', 'listenAllChat', 'autoReplyChat', 'cooldownSeconds', 'gameContext', 'captureContext'];
   for (const key of keys) {
     if (Object.prototype.hasOwnProperty.call(body, key)) state[key] = body[key];
   }
@@ -434,6 +473,22 @@ app.post('/api/test-message', async (req, res) => {
     forced: true
   });
   res.json({ ok: true });
+});
+
+
+app.get('/api/gemini-test', async (req, res) => {
+  try {
+    const models = await candidateGeminiModels();
+    if (!config.geminiApiKey) return res.status(400).json({ ok: false, error: 'GEMINI_API_KEY não configurada' });
+    if (!models.length) return res.status(500).json({ ok: false, error: 'Nenhum modelo Gemini disponível para essa chave', models });
+    const model = models[0];
+    const text = await callGeminiREST(model, 'Responda só: Gemini funcionando.');
+    state.aiStatus = { ok: true, lastError: '', lastModel: model, lastAt: Date.now() };
+    res.json({ ok: true, model, text, models: models.slice(0, 12) });
+  } catch (err) {
+    state.aiStatus = { ok: false, lastError: err.message, lastModel: config.geminiModel, lastAt: Date.now() };
+    res.status(500).json({ ok: false, error: err.message, aiStatus: state.aiStatus });
+  }
 });
 
 io.on('connection', socket => {
