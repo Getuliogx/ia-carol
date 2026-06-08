@@ -1,0 +1,21 @@
+{
+  "name": "ai-live-chat-voice-avatar-bot",
+  "version": "1.0.0",
+  "description": "Bot de live para Twitch/Kick com IA, voz do navegador, sentimentos, palavrões e avatar 2D/3D preparado para OBS.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "tmi.js": "^1.8.5"
+  }
+}

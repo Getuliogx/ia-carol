@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Live Bot - Painel</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="app">
+    <section class="card hero">
+      <h1>AI Live Bot</h1>
+      <p>Chat Twitch/Kick + IA + voz Google/navegador + sentimentos + avatar.</p>
+      <div class="status" id="status">Conectando...</div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Personalidade</h2>
+        <label>Sentimento</label>
+        <select id="emotion">
+          <option value="mixed">Misto / Todos</option>
+          <option value="friendly">Amigável</option>
+          <option value="calm">Tranquila</option>
+          <option value="angry">Raivosa</option>
+          <option value="sarcastic">Sarcástica</option>
+          <option value="savage">Debochada / Mal-humorada</option>
+          <option value="sensual">Sensual leve</option>
+          <option value="cute">Fofa</option>
+          <option value="sad">Triste / Dramática</option>
+          <option value="serious">Séria</option>
+          <option value="chaotic">Caótica</option>
+        </select>
+
+        <label>Nível de palavrão</label>
+        <select id="profanityLevel">
+          <option value="0">0 - Sem palavrão</option>
+          <option value="1">1 - Leve</option>
+          <option value="2">2 - Médio</option>
+          <option value="3">3 - Pesado</option>
+          <option value="4">4 - Caos</option>
+        </select>
+
+        <label>Voz</label>
+        <select id="voiceGender">
+          <option value="auto">Automática por sentimento</option>
+          <option value="female">Feminina</option>
+          <option value="male">Masculina</option>
+        </select>
+
+        <label>Cooldown entre falas</label>
+        <input id="cooldownSeconds" type="number" min="1" max="120" value="8" />
+
+        <div class="checks">
+          <label><input type="checkbox" id="speakEnabled" checked /> Falar em voz</label>
+          <label><input type="checkbox" id="listenAllChat" checked /> Ler chat inteiro</label>
+          <label><input type="checkbox" id="replyInChat" /> Responder texto no chat da Twitch</label>
+        </div>
+        <button id="saveSettings">Salvar configurações</button>
+      </div>
+
+      <div class="card">
+        <h2>Voz e microfone</h2>
+        <button id="loadVoices">Carregar vozes</button>
+        <select id="voiceSelect"></select>
+        <button id="testVoice">Testar voz</button>
+        <hr>
+        <button id="startMic">Escutar microfone</button>
+        <button id="stopMic">Parar microfone</button>
+        <label><input type="checkbox" id="micForceReply" /> Responder ao streamer automaticamente</label>
+        <div class="mini" id="micText">Microfone parado.</div>
+      </div>
+
+      <div class="card">
+        <h2>Jogo / Placa de captura</h2>
+        <p class="mini">Cole aqui o que está acontecendo no jogo ou captura. Isso entra no contexto da IA. Para captura real de tela/áudio, precisa adicionar depois uma ponte específica.</p>
+        <label>Contexto do jogo</label>
+        <textarea id="gameContext" placeholder="Ex: streamer morreu no boss, está jogando Resident Evil, tela de derrota..."></textarea>
+        <label>Contexto da placa/captura</label>
+        <textarea id="captureContext" placeholder="Ex: PS2 via placa de captura, som do jogo alto, tela escura..."></textarea>
+        <button id="saveContext">Salvar contexto</button>
+        <button id="forceGameReply">Forçar resposta sobre jogo/captura</button>
+      </div>
+
+      <div class="card">
+        <h2>Teste</h2>
+        <input id="testUser" placeholder="Nome" value="Chat" />
+        <textarea id="testMessage">faz uma resposta misturando sarcasmo, raiva leve e deboche</textarea>
+        <button id="sendTest">Enviar teste</button>
+        <p class="mini">URL para OBS:</p>
+        <code id="obsUrl"></code>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Chat / Respostas</h2>
+      <div id="log" class="log"></div>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/script.js"></script>
+</body>
+</html>
