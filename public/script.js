@@ -157,7 +157,12 @@ window.addEventListener('load', async () => {
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
     applyState(cfg.publicConfig.state);
-    if ($('status')) $('status').textContent = cfg.publicConfig.hasGemini ? 'Conectado com IA Gemini' : 'Conectado sem API: respostas locais';
+    if ($('status')) {
+      const ai = cfg.publicConfig.aiStatus;
+      if (!cfg.publicConfig.hasGemini) $('status').textContent = 'Sem GEMINI_API_KEY: respostas locais';
+      else if (ai?.ok) $('status').textContent = 'Gemini OK: ' + ai.lastModel;
+      else $('status').textContent = 'Gemini configurado, aguardando teste/resposta';
+    }
   } catch {}
 
   $('loadVoices')?.addEventListener('click', loadVoices);

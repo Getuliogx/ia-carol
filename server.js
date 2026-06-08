@@ -4,7 +4,6 @@ import http from 'http';
 import cors from 'cors';
 import { Server } from 'socket.io';
 import tmi from 'tmi.js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -48,7 +47,8 @@ const state = {
   streamerTranscript: '',
   gameContext: '',
   captureContext: '',
-  lastReplyTexts: []
+  lastReplyTexts: [],
+  aiStatus: { ok: false, lastError: '', lastModel: '', lastAt: 0 }
 };
 
 const emotionProfiles = {
@@ -148,6 +148,33 @@ function normalizeText(text) {
     .trim();
 }
 
+
+function answerWithoutAi(message, user) {
+  const raw = String(message || '').trim();
+  const m = normalizeText(raw);
+  const name = user || 'chat';
+
+  if (/\b(quer sair comigo|sair comigo|fica comigo|namora comigo|casar comigo)\b/.test(m)) {
+    return `olha, ${name}, convite ousado… eu sou só a ${config.botName}, mas posso te provocar na live sem nem sair da tela.`;
+  }
+  if (/\b(ligado|ta ligado|est[aá] ligado|funcionando|funciona)\b/.test(m)) {
+    return `tá ligado sim, ${name}. Se eu tô respondendo, é porque essa geringonça finalmente resolveu trabalhar.`;
+  }
+  if (/\b(burro|burra|idiota|lixo|ruim)\b/.test(m)) {
+    return `calma lá, ${name}. Eu posso errar, mas também posso devolver deboche com juros se você cutucar demais.`;
+  }
+  if (/\b(morreu|morri|derrota|perdi|game over|boss)\b/.test(m)) {
+    return `isso aí foi derrota com certificado, ${name}. O jogo passou o trator e ainda deu ré.`;
+  }
+  if (/\b(kick|twitch|chat)\b/.test(m)) {
+    return `eu tô de olho no chat, ${name}. Se o chat aprontar, eu comento sem dó.`;
+  }
+  if (m.endsWith('?') || /\b(qual|quem|quando|onde|como|porque|por que|oq|o que|pq)\b/.test(m)) {
+    return `${name}, pelo que você perguntou, eu diria: ${raw.replace(/[?!.]+$/,'')}… mas do meu jeito: depende do contexto da live e do caos que vocês estão criando.`;
+  }
+  return `${name}, eu ouvi isso: “${raw.slice(0, 80)}”. Vou usar como munição pra comentar a live.`;
+}
+
 function buildDirectAnswer(message, user) {
   const m = normalizeText(message);
   if (!m) return 'manda a pergunta direito que eu respondo, chat.';
@@ -177,9 +204,9 @@ function buildDirectAnswer(message, user) {
     return 'se a chave do Gemini estiver configurada no Render, eu respondo com IA real; sem ela, uso respostas locais mais simples.';
   }
   if (m.endsWith('?') || /\b(qual|quem|quando|onde|como|porque|por que|oq|o que|pq)\b/.test(m)) {
-    return `sobre “${String(message).slice(0, 80)}”, eu preciso da IA Gemini ligada para responder com precisão. Sem ela, eu só consigo comentar de forma genérica.`;
+    return answerWithoutAi(message, user);
   }
-  return `eu vi você falando “${String(message).slice(0, 80)}”. Vou guardar isso no contexto da live e reagir quando fizer sentido.`;
+  return answerWithoutAi(message, user);
 }
 
 function chooseTemplate(mode) {
@@ -207,25 +234,58 @@ function localReply({ user, message, source }) {
   return sanitizeForPlatform(base);
 }
 
-async function aiReply(payload) {
-  if (!config.geminiApiKey) return localReply(payload);
+async function callGeminiREST(modelName, prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(config.geminiApiKey)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.95,
+        topP: 0.95,
+        maxOutputTokens: 120
+      }
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.error?.message || `HTTP ${res.status}`;
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('').trim();
+  if (!text) throw new Error('Gemini respondeu vazio');
+  return text;
+}
 
-  try {
-    const genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    const model = genAI.getGenerativeModel({
-      model: config.geminiModel,
-      generationConfig: { maxOutputTokens: 90, temperature: 0.85 }
-    });
-    const prompt = `
+function candidateGeminiModels() {
+  const envModel = String(config.geminiModel || '').trim();
+  return [...new Set([
+    envModel,
+    'gemini-3.5-flash',
+    'gemini-flash-latest',
+    'gemini-2.5-flash'
+  ].filter(Boolean))];
+}
+
+async function aiReply(payload) {
+  if (!config.geminiApiKey) {
+    state.aiStatus = { ok: false, lastError: 'GEMINI_API_KEY não configurada no Render', lastModel: '', lastAt: Date.now() };
+    return localReply(payload);
+  }
+
+  const prompt = `
 Você é ${config.botName}, ${config.botPersona}, uma IA/personagem de live em português brasileiro.
-Responda diretamente à mensagem atual. Não fuja da pergunta. Se perguntarem seu nome, diga que você é ${config.botName}.
-Responda com 1 frase curta, no máximo 2 se precisar, para falar rápido no OBS.
+REGRA PRINCIPAL: responda a mensagem atual de forma direta. Não diga que precisa de Gemini. Não diga que é fallback. Não explique configuração.
+Se perguntarem seu nome, responda que você é ${config.botName}.
+Responda com 1 frase curta, natural e boa para voz no OBS.
 Modo emocional atual: ${state.emotion}.
 Instrução emocional: ${emotionProfiles[state.emotion] || emotionProfiles.mixed}
 Nível de palavrão: ${state.profanityLevel}. ${profanityInstruction(state.profanityLevel)}
-Sensualidade permitida: pesada/intensa, provocadora, com duplo sentido e tom safado. Não narre ato sexual gráfico, não faça assédio direcionado, não envolva menores e não pressione ninguém.
-Não faça ameaça real, discurso de ódio, assédio direcionado, ou ataque a grupos protegidos.
-Pode zoar a situação, o jogo, bugs, jogadas ruins e o caos do chat.
+Sensualidade: se o modo pedir, use sensual pesado/intenso, provocador e com duplo sentido. Não narre ato sexual gráfico, não faça assédio direcionado, não envolva menores.
+Pode xingar situações, bugs, jogo ruim, derrota e caos do chat. Não faça ameaça real, discurso de ódio ou ataque a grupos protegidos.
 
 Contexto recente do chat:
 ${state.lastMessages.slice(-8).map(m => `[${m.source}] ${m.user}: ${m.message}`).join('\n')}
@@ -241,14 +301,23 @@ ${state.captureContext || 'Nenhum contexto.'}
 
 Mensagem atual de ${payload.user} em ${payload.source}: ${payload.message}
 
-Responda apenas a fala da personagem, sem aspas, sem explicar regras.`;
+Responda apenas a fala da personagem, sem aspas.`;
 
-    const result = await model.generateContent(prompt);
-    return sanitizeForPlatform(result.response.text());
-  } catch (err) {
-    console.error('Erro IA:', err.message);
-    return localReply(payload);
+  let lastErr = null;
+  for (const modelName of candidateGeminiModels()) {
+    try {
+      const text = await callGeminiREST(modelName, prompt);
+      state.aiStatus = { ok: true, lastError: '', lastModel: modelName, lastAt: Date.now() };
+      return sanitizeForPlatform(text);
+    } catch (err) {
+      lastErr = err;
+      console.error(`Erro IA Gemini (${modelName}):`, err.message);
+      if (![404, 400].includes(err.status)) break;
+    }
   }
+
+  state.aiStatus = { ok: false, lastError: lastErr?.message || 'Erro desconhecido no Gemini', lastModel: config.geminiModel, lastAt: Date.now() };
+  return localReply(payload);
 }
 
 function shouldRespond() {
@@ -302,7 +371,8 @@ app.get('/api/config', (req, res) => {
       geminiModel: config.geminiModel,
       botName: config.botName,
       showBotText: config.showBotText,
-      state
+      state,
+      aiStatus: state.aiStatus
     }
   });
 });
