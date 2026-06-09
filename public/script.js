@@ -45,16 +45,18 @@ function pickVoice(gender) {
 function emotionVoiceParams(emotion) {
   const base = { rate: 1, pitch: 1, volume: 1 };
   const map = {
-    mixed: { rate: 1.05, pitch: 1, volume: 1 },
-    angry: { rate: 1.22, pitch: 0.82, volume: 1 },
-    sarcastic: { rate: 0.95, pitch: 0.9, volume: 1 },
-    savage: { rate: 1.08, pitch: 0.85, volume: 1 },
-    sensual: { rate: 0.68, pitch: 0.7, volume: 0.95 },
-    cute: { rate: 1.08, pitch: 1.25, volume: 1 },
-    sad: { rate: 0.78, pitch: 0.8, volume: 0.75 },
-    calm: { rate: 0.85, pitch: 0.92, volume: 0.85 },
-    chaotic: { rate: 1.28, pitch: 1.1, volume: 1 },
-    serious: { rate: 0.95, pitch: 0.88, volume: 0.9 },
+    // Ajustes naturais: sentimentos mudam mais o texto do que a fala.
+    // Rate muito baixo parecia voz lerda no OBS/Chrome, principalmente no sensual.
+    mixed: { rate: 1.00, pitch: 1.00, volume: 1 },
+    angry: { rate: 1.08, pitch: 0.96, volume: 1 },
+    sarcastic: { rate: 1.00, pitch: 0.98, volume: 1 },
+    savage: { rate: 1.04, pitch: 0.96, volume: 1 },
+    sensual: { rate: 0.92, pitch: 0.92, volume: 1 },
+    cute: { rate: 1.03, pitch: 1.08, volume: 1 },
+    sad: { rate: 0.92, pitch: 0.95, volume: 0.9 },
+    calm: { rate: 0.96, pitch: 0.98, volume: 0.95 },
+    chaotic: { rate: 1.10, pitch: 1.02, volume: 1 },
+    serious: { rate: 0.98, pitch: 0.96, volume: 1 },
     friendly: base
   };
   return map[emotion] || base;

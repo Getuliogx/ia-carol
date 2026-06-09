@@ -11,3 +11,7 @@ Correções desta versão:
 Depois de subir no GitHub, faça Manual Deploy -> Clear build cache & deploy no Render.
 
 No OBS, abra a fonte navegador, clique com botão direito -> Interagir, clique no aviso "ativar áudio" e depois teste pelo painel usando "Testar voz no OBS".
+
+
+## Voz natural
+Esta versão remove os ajustes exagerados de voz por sentimento. O modo sensual pesado agora usa rate 0.92 e pitch 0.92 para não parecer lento/lerdo no OBS.
