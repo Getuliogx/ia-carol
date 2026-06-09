@@ -27,7 +27,7 @@ const config = {
   aiProvider: (process.env.AI_PROVIDER || 'ollama').toLowerCase(),
   ollamaUrl: (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),
   ollamaModel: process.env.OLLAMA_MODEL || 'gemma3:270m',
-  ollamaMaxTokens: Number(process.env.OLLAMA_MAX_TOKENS || 35),
+  ollamaMaxTokens: Math.max(4, Math.min(20, Number(process.env.OLLAMA_MAX_TOKENS || 12))),
   ollamaTemperature: Number(process.env.OLLAMA_TEMPERATURE || 0.8),
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
@@ -244,41 +244,83 @@ function localReply({ user, message, source }) {
 
 
 function buildShortPrompt(payload) {
-  return `Você é ${config.botName}, ${config.botPersona}, uma IA/personagem de live em português brasileiro.
-Responda SOMENTE a mensagem atual.
-Use UMA frase curta, direta e boa para voz no OBS.
-Tom padrão: sarcástico, debochado, raivoso quando combinar e sensual pesado com duplo sentido.
-Não explique regras. Não diga que é IA local. Não repita bordões.
-Palavrão nível ${state.profanityLevel}: ${profanityInstruction(state.profanityLevel)}
-Sentimento: ${state.emotion}. ${emotionProfiles[state.emotion] || emotionProfiles.mixed}
-Contexto do jogo: ${state.gameContext || 'nenhum'}
-Streamer disse: ${state.streamerTranscript || 'nada'}
-Mensagem de ${payload.user}: ${payload.message}
-Resposta:`;
+  // Prompt curto de propósito: o gemma3:270m é muito leve e fica lento/burro com prompt grande.
+  const user = String(payload.user || 'chat').slice(0, 30);
+  const msg = String(payload.message || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+
+  let tone = 'debochada, sarcástica e direta';
+  if (state.emotion === 'sensual') tone = 'sensual pesada, provocadora e com duplo sentido, sem sexo explícito';
+  if (state.emotion === 'angry') tone = 'irritada, debochada e com palavrão';
+  if (state.emotion === 'friendly') tone = 'amigável e engraçada';
+  if (state.emotion === 'mixed') tone = 'mista: sarcasmo, deboche, raiva leve e sensual pesado';
+
+  const swear = Number(state.profanityLevel || 0) >= 3 ? 'Pode usar palavrão comum.' : 'Use pouco palavrão.';
+
+  return `Você é ${config.botName}, bot de live PT-BR. Responda só 1 frase curta. Tom: ${tone}. ${swear}\n${user}: ${msg}\n${config.botName}:`;
 }
 
 async function callOllama(prompt) {
-  const base = config.ollamaUrl;
-  const res = await fetch(`${base}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: config.ollamaModel,
-      prompt,
-      stream: false,
-      options: {
-        temperature: config.ollamaTemperature,
-        num_predict: config.ollamaMaxTokens,
-        top_p: 0.9,
-        repeat_penalty: 1.18
-      }
-    })
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Ollama HTTP ${res.status}`);
-  const text = String(data.response || '').trim();
-  if (!text) throw new Error('Ollama respondeu vazio');
-  return text;
+  const baseUrl = String(process.env.OLLAMA_URL || config.ollamaUrl || '').trim().replace(/\/+$/, '');
+  const model = String(process.env.OLLAMA_MODEL || config.ollamaModel || 'gemma3:270m').trim();
+  const maxTokens = Math.max(4, Math.min(20, Number(process.env.OLLAMA_MAX_TOKENS || config.ollamaMaxTokens || 12)));
+  const temperature = Number(process.env.OLLAMA_TEMPERATURE || config.ollamaTemperature || 0.8);
+
+  if (!baseUrl) throw new Error('OLLAMA_URL vazio no Render');
+
+  const controller = new AbortController();
+  const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || 180000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const url = `${baseUrl}/api/generate`;
+    console.log(`[Ollama] POST ${url} model=${model} maxTokens=${maxTokens}`);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'curl/8.0'
+      },
+      body: JSON.stringify({
+        model,
+        prompt,
+        stream: false,
+        options: {
+          temperature,
+          num_predict: maxTokens,
+          top_p: 0.9,
+          repeat_penalty: 1.1,
+          num_ctx: 1024
+        }
+      }),
+      signal: controller.signal
+    });
+
+    const text = await res.text();
+
+    if (!res.ok) {
+      throw new Error(`Ollama HTTP ${res.status}: ${text.slice(0, 500)}`);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`Ollama respondeu JSON inválido: ${text.slice(0, 300)}`);
+    }
+
+    const answer = String(data.response || '').trim();
+    if (!answer) throw new Error('Ollama respondeu vazio');
+    return answer;
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      throw new Error(`Ollama demorou mais de ${Math.round(timeoutMs / 1000)}s para responder`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function aiReplyOllama(payload) {
