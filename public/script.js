@@ -60,21 +60,128 @@ function emotionVoiceParams(emotion) {
   return map[emotion] || base;
 }
 
+let speechUnlocked = false;
+let speechQueue = [];
+let isSpeakingNow = false;
+let lastSpokenText = '';
+let lastSpokenAt = 0;
+
+function unlockSpeech() {
+  if (!('speechSynthesis' in window)) return;
+  speechUnlocked = true;
+  try { speechSynthesis.resume(); } catch {}
+}
+
+// O OBS/Chrome às vezes pausa o TTS sozinho. Esse loop acorda a voz.
+setInterval(() => {
+  if (!('speechSynthesis' in window)) return;
+  try { speechSynthesis.resume(); } catch {}
+}, 1500);
+
+function cleanSpeakText(text) {
+  return String(text || '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/https?:\/\/\S+/gi, ' link ')
+    .replace(/[`*_#<>\[\]{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function splitSpeech(text) {
+  const t = cleanSpeakText(text);
+  if (!t) return [];
+  // Frases curtas falam com mais estabilidade no OBS.
+  const parts = t.match(/[^.!?…]+[.!?…]?/g) || [t];
+  const out = [];
+  for (const part of parts) {
+    const x = part.trim();
+    if (!x) continue;
+    if (x.length <= 180) out.push(x);
+    else {
+      for (let i = 0; i < x.length; i += 160) out.push(x.slice(i, i + 160).trim());
+    }
+  }
+  return out.slice(0, 4);
+}
+
 function speak(text, payload = {}) {
   if (!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
-  const utter = new SpeechSynthesisUtterance(text);
+  const cleaned = cleanSpeakText(text);
+  if (!cleaned) return;
+
+  // Evita repetir a mesma fala em sequência, mas não bloqueia respostas novas.
+  const now = Date.now();
+  if (cleaned === lastSpokenText && now - lastSpokenAt < 4000) return;
+  lastSpokenText = cleaned;
+  lastSpokenAt = now;
+
+  const chunks = splitSpeech(cleaned);
+  for (const chunk of chunks) speechQueue.push({ text: chunk, payload, tries: 0 });
+  processSpeechQueue();
+}
+
+function processSpeechQueue() {
+  if (!('speechSynthesis' in window)) return;
+  if (isSpeakingNow) return;
+  const item = speechQueue.shift();
+  if (!item) {
+    setTalking(false);
+    return;
+  }
+
+  // Não deixa acumular fila infinita se o chat estiver muito rápido.
+  if (speechQueue.length > 6) speechQueue = speechQueue.slice(-6);
+
+  try { speechSynthesis.resume(); } catch {}
+
+  const utter = new SpeechSynthesisUtterance(item.text);
   utter.lang = 'pt-BR';
-  const voice = pickVoice(payload.voiceGender || currentState.voiceGender || 'auto');
+  const voice = pickVoice(item.payload.voiceGender || currentState.voiceGender || 'auto');
   if (voice) utter.voice = voice;
-  const params = emotionVoiceParams(payload.emotion || currentState.emotion || 'mixed');
+  const params = emotionVoiceParams(item.payload.emotion || currentState.emotion || 'mixed');
   utter.rate = params.rate;
   utter.pitch = params.pitch;
   utter.volume = params.volume;
-  utter.onstart = () => setTalking(true);
-  utter.onend = () => setTalking(false);
-  utter.onerror = () => setTalking(false);
-  speechSynthesis.speak(utter);
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    isSpeakingNow = false;
+    setTalking(false);
+    setTimeout(processSpeechQueue, 120);
+  };
+
+  utter.onstart = () => {
+    isSpeakingNow = true;
+    setTalking(true);
+  };
+  utter.onend = finish;
+  utter.onerror = () => {
+    isSpeakingNow = false;
+    setTalking(false);
+    // O Chromium do OBS às vezes falha a primeira tentativa. Tenta mais uma vez.
+    if (item.tries < 1) {
+      item.tries += 1;
+      speechQueue.unshift(item);
+      setTimeout(processSpeechQueue, 500);
+    } else {
+      setTimeout(processSpeechQueue, 120);
+    }
+  };
+
+  // Fallback: se onend não disparar, libera a fila.
+  const estimated = Math.max(2500, Math.min(25000, item.text.length * 95));
+  setTimeout(() => {
+    if (isSpeakingNow && !finished) finish();
+  }, estimated);
+
+  try {
+    isSpeakingNow = true;
+    speechSynthesis.speak(utter);
+  } catch {
+    finish();
+  }
 }
 
 function setTalking(on) {
@@ -152,6 +259,11 @@ socket.on('bot-reply', payload => {
 });
 
 window.addEventListener('load', async () => {
+  document.addEventListener('click', unlockSpeech);
+  document.addEventListener('keydown', unlockSpeech);
+  document.addEventListener('touchstart', unlockSpeech);
+  setTimeout(unlockSpeech, 700);
+
   if ($('obsUrl')) $('obsUrl').textContent = location.origin + '/obs';
   loadVoices();
   speechSynthesis.onvoiceschanged = loadVoices;
@@ -171,7 +283,7 @@ window.addEventListener('load', async () => {
 
   $('loadVoices')?.addEventListener('click', loadVoices);
   $('voiceSelect')?.addEventListener('change', e => { selectedVoiceName = e.target.value; localStorage.setItem('selectedVoiceName', selectedVoiceName); });
-  $('testVoice')?.addEventListener('click', () => speak('Teste de voz do bot. Eu posso falar com sarcasmo, raiva, fofura e caos.', readControls()));
+  $('testVoice')?.addEventListener('click', () => { unlockSpeech(); speak('Teste de voz do bot. Eu posso falar com sarcasmo, raiva, fofura e caos.', readControls()); });
   $('saveSettings')?.addEventListener('click', async () => { await postJSON('/api/settings', readControls()); logLine('<strong>Sistema</strong>: configurações salvas.'); });
   $('saveContext')?.addEventListener('click', async () => { await postJSON('/api/settings', { gameContext: $('gameContext').value, captureContext: $('captureContext').value }); logLine('<strong>Sistema</strong>: contexto salvo.'); });
   $('forceGameReply')?.addEventListener('click', async () => { await postJSON('/api/game-event', { text: `${$('gameContext').value} ${$('captureContext').value}`, forceReply: true }); });
@@ -202,6 +314,7 @@ window.addEventListener('load', async () => {
 
   if (isObs) {
     if ($('bubble')) $('bubble').style.display = 'none';
-    document.addEventListener('click', () => speechSynthesis.resume(), { once: true });
+    document.addEventListener('click', unlockSpeech);
+    setInterval(unlockSpeech, 1500);
   }
 });

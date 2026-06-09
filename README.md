@@ -80,3 +80,8 @@ Marcar: Controlar áudio via OBS
 ```
 
 No mixer do OBS, use `Monitorar e enviar` se quiser ouvir também.
+
+## Correção de voz no OBS
+Esta versão usa fila de fala, não cancela uma fala quando chega outra resposta, divide textos longos em partes e tenta reativar o SpeechSynthesis automaticamente no OBS/Chrome.
+
+No OBS, use a fonte Navegador com `Controlar áudio via OBS` marcado. Depois clique com botão direito na fonte > Interagir > clique uma vez dentro da tela para liberar a voz automática.
