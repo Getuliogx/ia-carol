@@ -24,6 +24,11 @@ const config = {
   kickEnable: String(process.env.KICK_ENABLE || 'false') === 'true',
   kickChannel: process.env.KICK_CHANNEL || '',
   kickSharedSecret: process.env.KICK_SHARED_SECRET || 'troque_essa_senha',
+  aiProvider: (process.env.AI_PROVIDER || 'ollama').toLowerCase(),
+  ollamaUrl: (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),
+  ollamaModel: process.env.OLLAMA_MODEL || 'gemma3:270m',
+  ollamaMaxTokens: Number(process.env.OLLAMA_MAX_TOKENS || 35),
+  ollamaTemperature: Number(process.env.OLLAMA_TEMPERATURE || 0.8),
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
   defaultProfanityLevel: Number(process.env.DEFAULT_PROFANITY_LEVEL || 2),
@@ -32,7 +37,8 @@ const config = {
   botName: process.env.BOT_NAME || 'Carol IA',
   botPersona: process.env.BOT_PERSONA || 'uma IA de live ousada, debochada, engraçada e direta',
   showBotText: String(process.env.SHOW_BOT_TEXT || 'false') === 'true',
-  requireGemini: String(process.env.REQUIRE_GEMINI || 'true') === 'true'
+  requireGemini: String(process.env.REQUIRE_GEMINI || 'false') === 'true',
+  requireOllama: String(process.env.REQUIRE_OLLAMA || 'false') === 'true'
 };
 
 const state = {
@@ -43,7 +49,7 @@ const state = {
   replyInChat: false,
   listenAllChat: true,
   autoReplyChat: String(process.env.AUTO_REPLY_CHAT || 'true') === 'true',
-  cooldownSeconds: Number(process.env.DEFAULT_COOLDOWN_SECONDS || 0),
+  cooldownSeconds: Number(process.env.DEFAULT_COOLDOWN_SECONDS || 15),
   lastSpokenAt: 0,
   lastMessages: [],
   streamerTranscript: '',
@@ -236,6 +242,58 @@ function localReply({ user, message, source }) {
   return sanitizeForPlatform(base);
 }
 
+
+function buildShortPrompt(payload) {
+  return `Você é ${config.botName}, ${config.botPersona}, uma IA/personagem de live em português brasileiro.
+Responda SOMENTE a mensagem atual.
+Use UMA frase curta, direta e boa para voz no OBS.
+Tom padrão: sarcástico, debochado, raivoso quando combinar e sensual pesado com duplo sentido.
+Não explique regras. Não diga que é IA local. Não repita bordões.
+Palavrão nível ${state.profanityLevel}: ${profanityInstruction(state.profanityLevel)}
+Sentimento: ${state.emotion}. ${emotionProfiles[state.emotion] || emotionProfiles.mixed}
+Contexto do jogo: ${state.gameContext || 'nenhum'}
+Streamer disse: ${state.streamerTranscript || 'nada'}
+Mensagem de ${payload.user}: ${payload.message}
+Resposta:`;
+}
+
+async function callOllama(prompt) {
+  const base = config.ollamaUrl;
+  const res = await fetch(`${base}/api/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: config.ollamaModel,
+      prompt,
+      stream: false,
+      options: {
+        temperature: config.ollamaTemperature,
+        num_predict: config.ollamaMaxTokens,
+        top_p: 0.9,
+        repeat_penalty: 1.18
+      }
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Ollama HTTP ${res.status}`);
+  const text = String(data.response || '').trim();
+  if (!text) throw new Error('Ollama respondeu vazio');
+  return text;
+}
+
+async function aiReplyOllama(payload) {
+  try {
+    const text = await callOllama(buildShortPrompt(payload));
+    state.aiStatus = { ok: true, lastError: '', lastModel: `ollama:${config.ollamaModel}`, lastAt: Date.now() };
+    return sanitizeForPlatform(text);
+  } catch (err) {
+    console.error(`Erro IA Ollama (${config.ollamaModel}):`, err.message);
+    state.aiStatus = { ok: false, lastError: err.message, lastModel: `ollama:${config.ollamaModel}`, lastAt: Date.now() };
+    if (config.requireOllama) return sanitizeForPlatform(`Erro no Ollama: ${err.message}`);
+    return localReply(payload);
+  }
+}
+
 async function callGeminiREST(modelName, prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(config.geminiApiKey)}`;
   const res = await fetch(url, {
@@ -305,6 +363,9 @@ async function candidateGeminiModels() {
 }
 
 async function aiReply(payload) {
+  if (config.aiProvider === 'ollama') {
+    return aiReplyOllama(payload);
+  }
   if (!config.geminiApiKey) {
     state.aiStatus = { ok: false, lastError: 'GEMINI_API_KEY não configurada no Render', lastModel: '', lastAt: Date.now() };
     return localReply(payload);
@@ -405,13 +466,17 @@ app.get('/api/config', (req, res) => {
     publicConfig: {
       twitchChannel: config.twitchChannel,
       kickChannel: config.kickChannel,
+      aiProvider: config.aiProvider,
       hasGemini: Boolean(config.geminiApiKey),
       geminiModel: config.geminiModel,
+      ollamaUrl: config.ollamaUrl,
+      ollamaModel: config.ollamaModel,
       botName: config.botName,
       showBotText: config.showBotText,
       state,
       aiStatus: state.aiStatus,
-      requireGemini: config.requireGemini
+      requireGemini: config.requireGemini,
+      requireOllama: config.requireOllama
     }
   });
 });
@@ -475,6 +540,18 @@ app.post('/api/test-message', async (req, res) => {
   res.json({ ok: true });
 });
 
+
+
+app.get('/api/ollama-test', async (req, res) => {
+  try {
+    const text = await callOllama('Responda só: Ollama funcionando.');
+    state.aiStatus = { ok: true, lastError: '', lastModel: `ollama:${config.ollamaModel}`, lastAt: Date.now() };
+    res.json({ ok: true, model: config.ollamaModel, url: config.ollamaUrl, text });
+  } catch (err) {
+    state.aiStatus = { ok: false, lastError: err.message, lastModel: `ollama:${config.ollamaModel}`, lastAt: Date.now() };
+    res.status(500).json({ ok: false, error: err.message, aiStatus: state.aiStatus });
+  }
+});
 
 app.get('/api/gemini-test', async (req, res) => {
   try {

@@ -1,127 +1,82 @@
-# AI Live Chat Voice Avatar Bot
+# AI Live Bot - Render + Ollama externo
 
-Bot para live usando Render + Node.js + OBS.
+Versão feita para live longa usando Ollama fora do Render, com modelo leve `gemma3:270m`.
 
-Ele lê chat da Twitch, recebe eventos externos/Kick por webhook, escuta microfone no navegador, fala com voz do navegador, usa sentimentos, níveis de palavrão e avatar 2D simples.
+## URLs
 
-## O que já vem pronto
+Painel:
+`https://SEU_APP.onrender.com/`
 
-- Painel web em `/`
-- Tela limpa para OBS em `/obs`
-- Twitch chat via `tmi.js`
-- IA com Gemini opcional
-- Respostas automáticas locais caso não tenha API
-- Voz masculina/feminina pelo navegador
-- Sentimentos separados e modo padrão `Misto / Todos`
-- Níveis de palavrão 0 a 4
-- Sensual pesado, sarcasmo, raiva, deboche, fofo, triste, dramático etc.
-- Captura de microfone pelo navegador
-- Entrada manual para eventos do jogo/placa de captura
-- Avatar 2D com boca mexendo enquanto fala
-- Webhook para Kick ou qualquer ponte externa: `POST /api/kick-message`
+OBS:
+`https://SEU_APP.onrender.com/obs.html`
 
-## Arquivos importantes
+## Variáveis no Render
 
-```txt
-server.js
-public/index.html
-public/obs.html
-public/script.js
-public/style.css
-.env.example
+Use:
+
+```
+AI_PROVIDER=ollama
+OLLAMA_URL=https://SUA_URL_DO_TUNNEL
+OLLAMA_MODEL=gemma3:270m
+OLLAMA_MAX_TOKENS=35
+OLLAMA_TEMPERATURE=0.8
+REQUIRE_OLLAMA=false
+DEFAULT_COOLDOWN_SECONDS=15
+DEFAULT_EMOTION=mixed
+DEFAULT_PROFANITY_LEVEL=3
+ALLOW_SENSUAL_HEAVY=true
+SHOW_BOT_TEXT=false
+AUTO_REPLY_CHAT=true
+BOT_NAME=Carol IA
+BOT_PERSONA=uma IA de live ousada, debochada, sensual, sarcástica e direta
 ```
 
-## Como usar localmente
+Twitch:
 
-```bash
-npm install
-copy .env.example .env
-npm start
+```
+TWITCH_ENABLE=true
+TWITCH_CHANNEL=nome_do_canal
+TWITCH_BOT_USERNAME=nome_da_conta_bot
+TWITCH_OAUTH_TOKEN=oauth:seu_token
 ```
 
-Depois abra:
+## Ollama no PC servidor
 
-```txt
-http://localhost:3000
+Baixe o modelo:
+
+```
+ollama pull gemma3:270m
 ```
 
-## Render
+Teste:
 
-Use Web Service.
-
-Build command:
-
-```bash
-npm install
+```
+ollama run gemma3:270m
 ```
 
-Start command:
+Para o Render acessar seu PC, use Cloudflare Tunnel/ngrok apontando para a porta 11434.
 
-```bash
-npm start
+Exemplo local do Ollama:
+
+```
+http://127.0.0.1:11434
 ```
 
-Adicione as variáveis de ambiente do `.env.example` no Render.
+No Render, use a URL pública do túnel, por exemplo:
+
+```
+OLLAMA_URL=https://sua-url.trycloudflare.com
+```
 
 ## OBS
 
-Adicione uma Fonte Navegador com:
+Adicione Fonte Navegador:
 
-```txt
-https://SEU-SITE-DO-RENDER.onrender.com/obs
+```
+URL: https://SEU_APP.onrender.com/obs.html
+Largura: 1920
+Altura: 1080
+Marcar: Controlar áudio via OBS
 ```
 
-Para configurar e ligar voz/microfone, abra:
-
-```txt
-https://SEU-SITE-DO-RENDER.onrender.com/
-```
-
-## Twitch token
-
-O token precisa começar com `oauth:`.
-
-Escopos recomendados:
-
-```txt
-chat:read
-chat:edit
-```
-
-## Kick
-
-Nesta versão o Kick entra por webhook:
-
-```txt
-POST /api/kick-message
-Content-Type: application/json
-
-{
-  "secret": "sua_senha_do_KICK_SHARED_SECRET",
-  "user": "nome",
-  "message": "mensagem do chat"
-}
-```
-
-Isso permite ligar depois com uma ponte Kick/serviço externo sem refazer o bot.
-
-
-## Correção desta versão
-
-- Fallback local agora responde perguntas simples diretamente, como nome do bot, saudação e dúvidas sobre Gemini.
-- Respostas locais não repetem a mesma frase toda hora.
-- Se não houver `GEMINI_API_KEY`, o painel avisa que está usando respostas locais. Para respostas realmente inteligentes, coloque a chave do Gemini nas variáveis do Render.
-- Novas variáveis opcionais:
-
-```env
-BOT_NAME=Carol IA
-BOT_PERSONA=uma IA de live ousada, debochada, engraçada e direta
-```
-
-
-Atualizacao rapida:
-SHOW_BOT_TEXT=false  # nao mostra texto no OBS, so avatar e voz
-DEFAULT_COOLDOWN_SECONDS=0  # responde sem esperar cooldown
-ALLOW_SENSUAL_HEAVY=true  # modo sensual pesado ativado
-
-OBS: use /obs.html ou /obs.
+No mixer do OBS, use `Monitorar e enviar` se quiser ouvir também.

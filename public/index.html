@@ -49,7 +49,7 @@
         </select>
 
         <label>Cooldown entre falas</label>
-        <input id="cooldownSeconds" type="number" min="1" max="120" value="0" />
+        <input id="cooldownSeconds" type="number" min="0" max="120" value="15" />
 
         <div class="checks">
           <label><input type="checkbox" id="speakEnabled" checked /> Falar em voz</label>
@@ -63,6 +63,7 @@
         <h2>Voz e microfone</h2>
         <button id="loadVoices">Carregar vozes</button>
         <select id="voiceSelect"></select>
+        <button id="testOllama" type="button">Testar Ollama</button>
         <button id="testGemini" type="button">Testar Gemini</button>
           <button id="testVoice">Testar voz</button>
         <hr>
@@ -86,7 +87,7 @@
       <div class="card">
         <h2>Teste</h2>
         <input id="testUser" placeholder="Nome" value="Chat" />
-        <textarea id="testMessage">faz uma resposta misturando sarcasmo, raiva, deboche e sensual pesado</textarea>
+        <textarea id="testMessage">responda em 1 frase curta: zoe o streamer que morreu no jogo</textarea>
         <button id="sendTest">Enviar teste</button>
         <p class="mini">URL para OBS:</p>
         <code id="obsUrl"></code>

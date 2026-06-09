@@ -161,7 +161,9 @@ window.addEventListener('load', async () => {
     applyState(cfg.publicConfig.state);
     if ($('status')) {
       const ai = cfg.publicConfig.aiStatus;
-      if (!cfg.publicConfig.hasGemini) $('status').textContent = 'Sem GEMINI_API_KEY: respostas locais';
+      if (cfg.publicConfig.aiProvider === 'ollama') {
+        $('status').textContent = ai?.ok ? 'Ollama OK: ' + ai.lastModel : 'Ollama configurado: ' + cfg.publicConfig.ollamaModel + '. Clique em Testar Ollama. Último erro: ' + (ai?.lastError || 'nenhum');
+      } else if (!cfg.publicConfig.hasGemini) $('status').textContent = 'Sem GEMINI_API_KEY: respostas locais';
       else if (ai?.ok) $('status').textContent = 'Gemini OK: ' + ai.lastModel;
       else $('status').textContent = 'Gemini configurado. Clique em Testar Gemini. Último erro: ' + (ai?.lastError || 'nenhum');
     }
@@ -174,6 +176,14 @@ window.addEventListener('load', async () => {
   $('saveContext')?.addEventListener('click', async () => { await postJSON('/api/settings', { gameContext: $('gameContext').value, captureContext: $('captureContext').value }); logLine('<strong>Sistema</strong>: contexto salvo.'); });
   $('forceGameReply')?.addEventListener('click', async () => { await postJSON('/api/game-event', { text: `${$('gameContext').value} ${$('captureContext').value}`, forceReply: true }); });
   $('sendTest')?.addEventListener('click', async () => { await postJSON('/api/test-message', { user: $('testUser').value, message: $('testMessage').value, source: 'teste' }); });
+  $('testOllama')?.addEventListener('click', async () => {
+    try {
+      const r = await fetch('/api/ollama-test').then(r => r.json());
+      logLine(`<strong>Ollama teste</strong>: ${r.ok ? 'OK modelo ' + r.model + ' - ' + r.text : 'ERRO: ' + r.error}`);
+      if ($('status')) $('status').textContent = r.ok ? 'Ollama OK: ' + r.model : 'Ollama ERRO: ' + r.error;
+    } catch (e) { logLine(`<strong>Ollama teste</strong>: ERRO ${e.message}`); }
+  });
+
   $('testGemini')?.addEventListener('click', async () => {
     try {
       const r = await fetch('/api/gemini-test').then(r => r.json());
