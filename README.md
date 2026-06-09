@@ -15,3 +15,16 @@ No OBS, abra a fonte navegador, clique com botão direito -> Interagir, clique n
 
 ## Voz natural
 Esta versão remove os ajustes exagerados de voz por sentimento. O modo sensual pesado agora usa rate 0.92 e pitch 0.92 para não parecer lento/lerdo no OBS.
+
+
+## Sentimentos fortes
+Esta versão reforça os sentimentos no servidor, não só no prompt:
+- Pós-processamento força palavrão quando nível 3/4 e o modelo tenta ficar limpo.
+- Sensual pesado fica mais provocante e adulto, com duplo sentido, mas sem sexo gráfico explícito.
+- Misto/Todos vem menos family friendly por padrão.
+
+Configuração recomendada no Render:
+DEFAULT_EMOTION=mixed
+DEFAULT_PROFANITY_LEVEL=4
+ALLOW_SENSUAL_HEAVY=true
+BOT_PERSONA=uma IA de live adulta, boca-suja, debochada, sarcástica, provocadora e direta
