@@ -460,10 +460,20 @@ Responda apenas a fala da personagem, sem aspas.`;
 }
 
 function shouldRespond() {
-  if (!state.listenAllChat) return false;
-  if (!state.autoReplyChat) return false;
+  if (!state.listenAllChat) {
+    io.emit('system-status', { text: 'Mensagem ignorada: Ler chat inteiro está desativado.', at: Date.now() });
+    return false;
+  }
+  if (!state.autoReplyChat) {
+    io.emit('system-status', { text: 'Mensagem ignorada: Responder automaticamente ao chat está desativado.', at: Date.now() });
+    return false;
+  }
   const now = Date.now();
-  if (now - state.lastSpokenAt < state.cooldownSeconds * 1000) return false;
+  const waitMs = state.cooldownSeconds * 1000 - (now - state.lastSpokenAt);
+  if (waitMs > 0) {
+    io.emit('system-status', { text: `Mensagem ignorada por cooldown. Faltam ${Math.ceil(waitMs / 1000)}s.`, at: Date.now() });
+    return false;
+  }
   state.lastSpokenAt = now;
   return true;
 }
@@ -478,6 +488,7 @@ async function processMessage({ source, user, message, forced = false }) {
 
   if (!forced && !shouldRespond()) return;
 
+  io.emit('system-status', { text: `Gerando resposta para ${item.user}...`, at: Date.now() });
   const reply = await aiReply(item);
   const payload = {
     ...item,
@@ -582,6 +593,24 @@ app.post('/api/test-message', async (req, res) => {
 });
 
 
+
+app.post('/api/speak-test', async (req, res) => {
+  const text = sanitizeForPlatform(req.body?.text || 'Teste de voz no OBS.');
+  const payload = {
+    source: 'sistema',
+    user: 'Sistema',
+    message: 'teste de voz',
+    reply: text,
+    emotion: state.emotion,
+    profanityLevel: state.profanityLevel,
+    voiceGender: state.voiceGender,
+    speakEnabled: true,
+    showBotText: config.showBotText,
+    at: Date.now()
+  };
+  io.emit('bot-reply', payload);
+  res.json({ ok: true, payload });
+});
 
 app.get('/api/ollama-test', async (req, res) => {
   try {

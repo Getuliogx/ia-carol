@@ -67,9 +67,35 @@ let lastSpokenText = '';
 let lastSpokenAt = 0;
 
 function unlockSpeech() {
-  if (!('speechSynthesis' in window)) return;
   speechUnlocked = true;
-  try { speechSynthesis.resume(); } catch {}
+  try { speechSynthesis?.resume?.(); } catch {}
+  try {
+    // Beep quase mudo só para liberar áudio/autoplay no Chromium/OBS.
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      window.__botAudioCtx = window.__botAudioCtx || new AudioCtx();
+      if (window.__botAudioCtx.state === 'suspended') window.__botAudioCtx.resume();
+    }
+  } catch {}
+  const u = $('audioUnlock');
+  if (u) u.style.display = 'none';
+}
+
+function playBeep() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = window.__botAudioCtx || new AudioCtx();
+    window.__botAudioCtx = ctx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.05;
+    osc.frequency.value = 440;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    setTimeout(() => { try { osc.stop(); } catch {} }, 120);
+  } catch {}
 }
 
 // O OBS/Chrome às vezes pausa o TTS sozinho. Esse loop acorda a voz.
@@ -202,7 +228,7 @@ function readControls() {
     voiceGender: $('voiceGender')?.value,
     speakEnabled: Boolean($('speakEnabled')?.checked),
     listenAllChat: Boolean($('listenAllChat')?.checked),
-    autoReplyChat: Boolean($('autoReplyChat')?.checked),
+    autoReplyChat: $('autoReplyChat') ? Boolean($('autoReplyChat').checked) : Boolean(currentState.autoReplyChat),
     replyInChat: Boolean($('replyInChat')?.checked),
     cooldownSeconds: Number($('cooldownSeconds')?.value ?? 0)
   };
@@ -249,6 +275,7 @@ socket.on('settings', applyState);
 socket.on('chat-message', msg => logLine(`<strong>[${msg.source}] ${msg.user}</strong>: ${msg.message}`));
 socket.on('streamer-speech', e => logLine(`<strong>[streamer]</strong>: ${e.text}`));
 socket.on('game-event', e => logLine(`<strong>[jogo/captura]</strong>: ${e.text}`));
+socket.on('system-status', e => logLine(`<strong>Sistema</strong>: ${e.text}`));
 socket.on('bot-reply', payload => {
   if ($('bubble')) {
     $('bubble').textContent = payload.showBotText ? payload.reply : '';
@@ -256,6 +283,7 @@ socket.on('bot-reply', payload => {
   }
   logLine(`<span class="reply"><strong>BOT</strong>: ${payload.reply}</span>`);
   if (payload.speakEnabled !== false) speak(payload.reply, payload);
+  else logLine('<strong>Sistema</strong>: fala em voz está desativada.');
 });
 
 window.addEventListener('load', async () => {
@@ -283,7 +311,8 @@ window.addEventListener('load', async () => {
 
   $('loadVoices')?.addEventListener('click', loadVoices);
   $('voiceSelect')?.addEventListener('change', e => { selectedVoiceName = e.target.value; localStorage.setItem('selectedVoiceName', selectedVoiceName); });
-  $('testVoice')?.addEventListener('click', () => { unlockSpeech(); speak('Teste de voz do bot. Eu posso falar com sarcasmo, raiva, fofura e caos.', readControls()); });
+  $('testVoice')?.addEventListener('click', () => { unlockSpeech(); playBeep(); speak('Teste de voz neste painel. Se você ouviu, a voz local está funcionando.', readControls()); });
+  $('testObsVoice')?.addEventListener('click', async () => { unlockSpeech(); await postJSON('/api/speak-test', { text: 'Teste de voz no OBS. Se essa fala saiu na live, o áudio da fonte navegador está funcionando.' }); logLine('<strong>Sistema</strong>: teste enviado para o OBS.'); });
   $('saveSettings')?.addEventListener('click', async () => { await postJSON('/api/settings', readControls()); logLine('<strong>Sistema</strong>: configurações salvas.'); });
   $('saveContext')?.addEventListener('click', async () => { await postJSON('/api/settings', { gameContext: $('gameContext').value, captureContext: $('captureContext').value }); logLine('<strong>Sistema</strong>: contexto salvo.'); });
   $('forceGameReply')?.addEventListener('click', async () => { await postJSON('/api/game-event', { text: `${$('gameContext').value} ${$('captureContext').value}`, forceReply: true }); });
@@ -314,7 +343,9 @@ window.addEventListener('load', async () => {
 
   if (isObs) {
     if ($('bubble')) $('bubble').style.display = 'none';
+    const unlock = $('audioUnlock');
+    if (unlock) unlock.addEventListener('click', () => { unlockSpeech(); playBeep(); speak('Áudio ativado.', { emotion: 'friendly', voiceGender: currentState.voiceGender || 'auto' }); });
     document.addEventListener('click', unlockSpeech);
-    setInterval(unlockSpeech, 1500);
+    // Não tenta falar sozinho antes do clique; isso causa mudo em algumas fontes navegador do OBS.
   }
 });

@@ -54,6 +54,7 @@
         <div class="checks">
           <label><input type="checkbox" id="speakEnabled" checked /> Falar em voz</label>
           <label><input type="checkbox" id="listenAllChat" checked /> Ler chat inteiro</label>
+          <label><input type="checkbox" id="autoReplyChat" checked /> Responder automaticamente ao chat</label>
           <label><input type="checkbox" id="replyInChat" /> Responder texto no chat da Twitch</label>
         </div>
         <button id="saveSettings">Salvar configurações</button>
@@ -65,7 +66,8 @@
         <select id="voiceSelect"></select>
         <button id="testOllama" type="button">Testar Ollama</button>
         <button id="testGemini" type="button">Testar Gemini</button>
-          <button id="testVoice">Testar voz</button>
+          <button id="testVoice">Testar voz neste painel</button>
+        <button id="testObsVoice" type="button">Testar voz no OBS</button>
         <hr>
         <button id="startMic">Escutar microfone</button>
         <button id="stopMic">Parar microfone</button>
