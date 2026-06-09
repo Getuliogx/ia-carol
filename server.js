@@ -27,7 +27,7 @@ const config = {
   aiProvider: (process.env.AI_PROVIDER || 'ollama').toLowerCase(),
   ollamaUrl: (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),
   ollamaModel: process.env.OLLAMA_MODEL || 'gemma3:270m',
-  ollamaMaxTokens: Math.max(4, Math.min(20, Number(process.env.OLLAMA_MAX_TOKENS || 12))),
+  // Sem limite fixo de tokens. O Ollama decide o tamanho da resposta, salvo se você definir OLLAMA_NUM_PREDICT manualmente.
   ollamaTemperature: Number(process.env.OLLAMA_TEMPERATURE || 0.8),
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
@@ -262,8 +262,8 @@ function buildShortPrompt(payload) {
 async function callOllama(prompt) {
   const baseUrl = String(process.env.OLLAMA_URL || config.ollamaUrl || '').trim().replace(/\/+$/, '');
   const model = String(process.env.OLLAMA_MODEL || config.ollamaModel || 'gemma3:270m').trim();
-  const maxTokens = Math.max(4, Math.min(20, Number(process.env.OLLAMA_MAX_TOKENS || config.ollamaMaxTokens || 12)));
   const temperature = Number(process.env.OLLAMA_TEMPERATURE || config.ollamaTemperature || 0.8);
+  const manualNumPredict = process.env.OLLAMA_NUM_PREDICT ? Number(process.env.OLLAMA_NUM_PREDICT) : null;
 
   if (!baseUrl) throw new Error('OLLAMA_URL vazio no Render');
 
@@ -273,7 +273,7 @@ async function callOllama(prompt) {
 
   try {
     const url = `${baseUrl}/api/generate`;
-    console.log(`[Ollama] POST ${url} model=${model} maxTokens=${maxTokens}`);
+    console.log(`[Ollama] POST ${url} model=${model} sem limite fixo de tokens`);
 
     const res = await fetch(url, {
       method: 'POST',
@@ -288,10 +288,9 @@ async function callOllama(prompt) {
         stream: false,
         options: {
           temperature,
-          num_predict: maxTokens,
           top_p: 0.9,
           repeat_penalty: 1.1,
-          num_ctx: 1024
+          ...(manualNumPredict ? { num_predict: manualNumPredict } : {})
         }
       }),
       signal: controller.signal
