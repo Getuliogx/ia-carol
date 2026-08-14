@@ -1,7 +1,7 @@
 {
   "name": "ai-live-chat-voice-avatar-bot",
-  "version": "1.0.0",
-  "description": "Bot de live para Twitch/Kick com IA, voz do navegador, sentimentos, palavrões e avatar 2D/3D preparado para OBS.",
+  "version": "1.1.0",
+  "description": "Carol IA para live com Ollama local leve, sentimentos por porcentagem e avatar/áudio separado no OBS.",
   "main": "server.js",
   "type": "module",
   "scripts": {

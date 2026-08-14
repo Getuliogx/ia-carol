@@ -11,9 +11,9 @@ const BRIDGE_SECRET = String(process.env.OLLAMA_BRIDGE_SECRET || 'carol-bridge-2
 const OLLAMA_LOCAL_URL = String(process.env.OLLAMA_LOCAL_URL || 'http://127.0.0.1:11434').trim().replace(/\/+$/, '');
 const DEFAULT_MODEL = String(process.env.OLLAMA_MODEL || 'gemma3:270m').trim();
 const REQUEST_TIMEOUT_MS = Math.max(5000, Number(process.env.OLLAMA_LOCAL_TIMEOUT_MS || 180000));
-const KEEP_ALIVE = String(process.env.OLLAMA_KEEP_ALIVE ?? '0').trim();
+const KEEP_ALIVE = String(process.env.OLLAMA_KEEP_ALIVE ?? '30m').trim();
 
-const TTS_SCRIPT = fileURLToPath(new URL('./windows-tts.ps1', import.meta.url));
+const TTS_WORKER_SCRIPT = fileURLToPath(new URL('./windows-tts-worker.ps1', import.meta.url));
 const TTS_TIMEOUT_MS = Math.max(5000, Number(process.env.CAROL_TTS_TIMEOUT_MS || 45000));
 
 function clamp(value, min, max) {
@@ -43,91 +43,120 @@ function ttsVoiceParams(emotion, intensity = 75) {
   };
 }
 
-async function generateWindowsTts(text, options = {}) {
+let ttsWorker = null;
+let ttsWorkerBuffer = '';
+const ttsWorkerPending = new Map();
+
+function stopTtsWorker(reason = 'TTS worker encerrado') {
+  const child = ttsWorker;
+  ttsWorker = null;
+  ttsWorkerBuffer = '';
+  for (const [id, pending] of ttsWorkerPending) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error(reason));
+    ttsWorkerPending.delete(id);
+  }
+  if (child) {
+    try { child.kill(); } catch {}
+  }
+}
+
+function ensureTtsWorker() {
   if (process.platform !== 'win32') throw new Error('TTS local requer Windows no PC da ponte.');
-  const cleanText = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 420);
+  if (ttsWorker && !ttsWorker.killed) return ttsWorker;
+
+  const child = spawn('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', TTS_WORKER_SCRIPT
+  ], {
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+
+  ttsWorker = child;
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', chunk => {
+    ttsWorkerBuffer += chunk;
+    while (true) {
+      const idx = ttsWorkerBuffer.indexOf('\n');
+      if (idx < 0) break;
+      const line = ttsWorkerBuffer.slice(0, idx).trim();
+      ttsWorkerBuffer = ttsWorkerBuffer.slice(idx + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); }
+      catch {
+        console.error('TTS worker retornou linha inválida:', line.slice(0, 200));
+        continue;
+      }
+      const pending = ttsWorkerPending.get(String(msg.id || ''));
+      if (!pending) continue;
+      clearTimeout(pending.timer);
+      ttsWorkerPending.delete(String(msg.id));
+      if (msg.ok) pending.resolve({ voiceName: String(msg.voiceName || '') });
+      else pending.reject(new Error(String(msg.error || 'Falha no TTS do Windows')));
+    }
+  });
+  child.stderr.on('data', chunk => {
+    const text = String(chunk || '').trim();
+    if (text) console.error('TTS worker:', text);
+  });
+  child.on('error', err => stopTtsWorker(`Falha no TTS persistente: ${err.message}`));
+  child.on('exit', code => {
+    if (ttsWorker === child) stopTtsWorker(`TTS persistente encerrou (${code ?? 'sem código'})`);
+  });
+  return child;
+}
+
+async function generateWindowsTts(text, options = {}) {
+  const cleanText = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 320);
   if (!cleanText) throw new Error('Texto vazio para TTS.');
 
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'carol-tts-'));
-  const textPath = path.join(tempDir, 'fala.txt');
   const wavPath = path.join(tempDir, 'fala.wav');
   const genderRaw = String(options.voiceGender || 'auto').toLowerCase();
   const gender = ['female', 'male'].includes(genderRaw) ? genderRaw : 'auto';
   const params = ttsVoiceParams(options.emotion, options.emotionIntensity);
-  await fs.writeFile(textPath, cleanText, 'utf8');
+  const id = `voice-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  let voiceName = '';
   try {
-    voiceName = await new Promise((resolve, reject) => {
-      const args = [
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-File', TTS_SCRIPT,
-        '-TextFile', textPath,
-        '-OutputFile', wavPath,
-        '-Gender', gender,
-        '-Rate', String(params.rate),
-        '-Volume', String(params.volume)
-      ];
-      const child = spawn('powershell.exe', args, { windowsHide: true });
-      let stdout = '';
-      let stderr = '';
+    const child = ensureTtsWorker();
+    const meta = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        try { child.kill(); } catch {}
+        ttsWorkerPending.delete(id);
+        stopTtsWorker('TTS local travou e foi reiniciado');
         reject(new Error(`TTS demorou mais de ${Math.round(TTS_TIMEOUT_MS / 1000)}s`));
       }, TTS_TIMEOUT_MS);
-      child.stdout.on('data', d => { stdout += d.toString(); });
-      child.stderr.on('data', d => { stderr += d.toString(); });
-      child.on('error', err => {
-        clearTimeout(timer);
-        reject(new Error(`Falha ao abrir TTS do Windows: ${err.message}`));
+      ttsWorkerPending.set(id, { resolve, reject, timer });
+
+      const job = JSON.stringify({
+        id,
+        text: cleanText,
+        outputFile: wavPath,
+        gender,
+        rate: params.rate,
+        volume: params.volume
       });
-      child.on('close', code => {
+      child.stdin.write(job + '\n', 'utf8', err => {
+        if (!err) return;
         clearTimeout(timer);
-        if (code === 0) resolve(stdout.trim());
-        else reject(new Error(`TTS Windows falhou (${code}): ${stderr.trim() || stdout.trim() || 'erro desconhecido'}`));
+        ttsWorkerPending.delete(id);
+        reject(new Error(`Falha enviando texto ao TTS: ${err.message}`));
       });
     });
 
     const wav = await fs.readFile(wavPath);
     if (!wav.length) throw new Error('TTS Windows gerou arquivo vazio.');
-    return { audioBase64: wav.toString('base64'), mimeType: 'audio/wav', voiceName };
+    return { audioBase64: wav.toString('base64'), mimeType: 'audio/wav', voiceName: meta.voiceName };
   } finally {
     try { await fs.rm(tempDir, { recursive: true, force: true }); } catch {}
   }
 }
 
-console.log('Iniciando ponte Ollama...');
-console.log('Render:', RENDER_URL);
-console.log('Ollama local:', OLLAMA_LOCAL_URL);
-console.log('Modelo padrão:', DEFAULT_MODEL);
+let ollamaQueue = Promise.resolve();
 
-const socket = io(RENDER_URL, {
-  transports: ['websocket', 'polling'],
-  auth: { role: 'ollama-bridge', secret: BRIDGE_SECRET },
-  reconnection: true,
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 1000,
-  reconnectionDelayMax: 10000,
-  timeout: 20000
-});
-
-socket.on('connect', () => {
-  console.log('✓ Ponte conectada ao Render. ID:', socket.id);
-});
-
-socket.on('disconnect', reason => {
-  console.log('Ponte desconectada do Render:', reason, '- reconectando automaticamente...');
-});
-
-socket.on('connect_error', err => {
-  console.error('Falha ao conectar no Render:', err.message);
-});
-
-socket.on('bridge-error', data => {
-  console.error('Render recusou a ponte:', data?.error || 'erro desconhecido');
-});
-
-socket.on('ollama-generate', async req => {
+async function handleOllamaGenerate(req) {
   const requestId = String(req?.requestId || '');
   if (!requestId) return;
 
@@ -164,6 +193,76 @@ socket.on('ollama-generate', async req => {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function warmOllama() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120000);
+  try {
+    console.log(`Aquecendo ${DEFAULT_MODEL} uma única vez...`);
+    const response = await fetch(`${OLLAMA_LOCAL_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: DEFAULT_MODEL,
+        prompt: 'ok',
+        stream: false,
+        keep_alive: KEEP_ALIVE,
+        options: { num_ctx: 512, num_predict: 1, temperature: 0 }
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    await response.text();
+    console.log(`✓ ${DEFAULT_MODEL} carregado e pronto. keep_alive=${KEEP_ALIVE}`);
+  } catch (err) {
+    console.warn('Não consegui pré-carregar o Ollama; a primeira resposta pode demorar mais:', err.message);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+console.log('Iniciando ponte Ollama...');
+console.log('Render:', RENDER_URL);
+console.log('Ollama local:', OLLAMA_LOCAL_URL);
+console.log('Modelo padrão:', DEFAULT_MODEL);
+
+const socket = io(RENDER_URL, {
+  transports: ['websocket', 'polling'],
+  auth: { role: 'ollama-bridge', secret: BRIDGE_SECRET },
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 10000,
+  timeout: 20000
+});
+
+let warmed = false;
+socket.on('connect', () => {
+  console.log('✓ Ponte conectada ao Render. ID:', socket.id);
+  if (!warmed) {
+    warmed = true;
+    ollamaQueue = ollamaQueue.catch(() => {}).then(() => warmOllama());
+  }
+});
+
+socket.on('disconnect', reason => {
+  console.log('Ponte desconectada do Render:', reason, '- reconectando automaticamente...');
+});
+
+socket.on('connect_error', err => {
+  console.error('Falha ao conectar no Render:', err.message);
+});
+
+socket.on('bridge-error', data => {
+  console.error('Render recusou a ponte:', data?.error || 'erro desconhecido');
+});
+
+socket.on('ollama-generate', req => {
+  // Nunca deixa duas gerações disputarem CPU/GPU ao mesmo tempo.
+  ollamaQueue = ollamaQueue
+    .catch(() => {})
+    .then(() => handleOllamaGenerate(req));
 });
 
 socket.on('tts-generate', async req => {

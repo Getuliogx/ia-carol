@@ -65,7 +65,7 @@ REM Evita abrir duas pontes ao clicar duas vezes.
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'ollama-bridge\\.js' -and $_.Name -match 'node' }; if($p){exit 0}else{exit 1}" >nul 2>nul
 if errorlevel 1 (
   echo [Carol IA] Conectando ao Render...
-  set "OLLAMA_KEEP_ALIVE=0"
+  set "OLLAMA_KEEP_ALIVE=30m"
   start "Carol IA - Ponte" /min cmd /c node ollama-bridge.js ^>^> carol-ponte.log 2^>^&1
 ) else (
   echo [Carol IA] A conexao ja esta ativa.

@@ -1,10 +1,10 @@
-const socket = io();
+const isObs = document.body.classList.contains('obs-body');
+const socket = io({ auth: { role: isObs ? 'obs' : 'panel' } });
 let currentState = {};
 let selectedVoiceName = localStorage.getItem('selectedVoiceName') || '';
 let recognition = null;
 
 const $ = id => document.getElementById(id);
-const isObs = document.body.classList.contains('obs-body');
 
 function logLine(html) {
   const log = $('log');
@@ -113,7 +113,7 @@ function base64ToBlob(base64, mimeType = 'audio/wav') {
 function enqueueObsAudio(payload = {}) {
   if (!isObs || !payload.audioBase64) return;
   obsAudioQueue.push(payload);
-  if (obsAudioQueue.length > 4) obsAudioQueue = obsAudioQueue.slice(-4);
+  if (obsAudioQueue.length > 2) obsAudioQueue = obsAudioQueue.slice(-2);
   processObsAudioQueue();
 }
 
@@ -448,7 +448,7 @@ window.addEventListener('load', async () => {
         if (cfg.publicConfig.ollamaBridgeConnected) {
           $('status').textContent = ai?.ok ? 'Ponte Ollama conectada - ' + ai.lastModel : 'Ponte Ollama conectada. Clique em Testar Ollama.';
         } else if (cfg.publicConfig.ollamaBridgeEnabled) {
-          $('status').textContent = 'Aguardando a ponte Ollama local. Inicie npm run bridge no PC do Ollama.';
+          $('status').textContent = 'Aguardando a Carol local. Abra CAROL IA - INICIAR.bat no PC da live.';
         } else {
           $('status').textContent = ai?.ok ? 'Ollama OK: ' + ai.lastModel : 'Ollama direto configurado: ' + cfg.publicConfig.ollamaModel + '. Clique em Testar Ollama.';
         }

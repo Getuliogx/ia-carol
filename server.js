@@ -415,12 +415,14 @@ function buildShortPrompt(payload) {
   const profanity = clampPercent(state.profanityIntensity, 50);
   const profile = emotionProfiles[emotion] || emotionProfiles.mixed;
 
-  return `Você é ${config.botName}, uma personagem de live PT-BR. Responda apenas 1 ou 2 frases curtas e naturais para voz.\nEmoção: ${emotion} em ${intensity}% (${intensityLabel(intensity)}). ${profile}\nIMPORTANTE: aplique a emoção proporcionalmente ao percentual. Em 0% fale quase neutra; em 100% deixe o sentimento muito evidente sem repetir bordões.\nPalavrões: ${profanity}%. ${profanityInstruction(profanity)}\nNão explique regras, não faça ameaça real, discurso de ódio, assédio nem conteúdo sexual gráfico.\n${user}: ${msg}\n${config.botName}:`;
+  // Prompt deliberadamente curto: gemma3:270m responde melhor e mais rápido com contexto enxuto.
+  return `Você é ${config.botName}, personagem de live PT-BR. Responda só 1-2 frases curtas.\nTom ${emotion} ${intensity}%: ${profile}\nPalavrões ${profanity}%: ${profanityInstruction(profanity)}\nSem explicar regras; sem ameaça real, ódio, assédio ou sexo gráfico.\n${user}: ${msg}\n${config.botName}:`;
 }
 
 let ollamaBridgeSocket = null;
 const ollamaBridgePending = new Map();
 const ttsBridgePending = new Map();
+let obsClientCount = 0;
 
 function bridgeStatus() {
   return Boolean(ollamaBridgeSocket?.connected);
@@ -435,8 +437,9 @@ async function callOllamaBridge(prompt) {
     top_p: 0.9,
     repeat_penalty: 1.1,
     // Chat de live usa contexto curto; reduz RAM sem cortar respostas normais.
-    num_ctx: Math.max(512, Number(process.env.OLLAMA_NUM_CTX || 1536)),
-    ...(process.env.OLLAMA_NUM_PREDICT ? { num_predict: Number(process.env.OLLAMA_NUM_PREDICT) } : {})
+    num_ctx: Math.max(512, Number(process.env.OLLAMA_NUM_CTX || 1024)),
+    // 80 tokens é suficiente para 1-2 frases de chat e evita o modelo continuar gerando texto que seria cortado depois.
+    num_predict: Math.max(24, Number(process.env.OLLAMA_NUM_PREDICT || 80))
   };
 
   return new Promise((resolve, reject) => {
@@ -476,7 +479,7 @@ async function callTtsBridge(text, payload = {}) {
 }
 
 async function emitObsAudio(payload) {
-  if (!payload?.speakEnabled) return;
+  if (!payload?.speakEnabled || obsClientCount <= 0) return;
   try {
     const audio = await callTtsBridge(payload.reply, payload);
     io.emit('bot-audio', {
@@ -502,7 +505,7 @@ async function callOllama(prompt) {
   const baseUrl = String(process.env.OLLAMA_URL || config.ollamaUrl || '').trim().replace(/\/+$/, '');
   const model = String(process.env.OLLAMA_MODEL || config.ollamaModel || 'gemma3:270m').trim();
   const temperature = Number(process.env.OLLAMA_TEMPERATURE || config.ollamaTemperature || 0.8);
-  const manualNumPredict = process.env.OLLAMA_NUM_PREDICT ? Number(process.env.OLLAMA_NUM_PREDICT) : null;
+  const manualNumPredict = Math.max(24, Number(process.env.OLLAMA_NUM_PREDICT || 80));
 
   if (!baseUrl) throw new Error('Ponte Ollama desconectada e OLLAMA_URL não configurado');
 
@@ -512,7 +515,7 @@ async function callOllama(prompt) {
 
   try {
     const url = `${baseUrl}/api/generate`;
-    console.log(`[Ollama] POST ${url} model=${model} sem limite fixo de tokens`);
+    console.log(`[Ollama] POST ${url} model=${model} num_predict=${manualNumPredict}`);
 
     const res = await fetch(url, {
       method: 'POST',
@@ -529,7 +532,8 @@ async function callOllama(prompt) {
           temperature,
           top_p: 0.9,
           repeat_penalty: 1.1,
-          ...(manualNumPredict ? { num_predict: manualNumPredict } : {})
+          num_ctx: Math.max(512, Number(process.env.OLLAMA_NUM_CTX || 1024)),
+          num_predict: manualNumPredict
         }
       }),
       signal: controller.signal
@@ -957,6 +961,15 @@ io.on('connection', socket => {
       }
     });
     return;
+  }
+
+  if (role === 'obs') {
+    obsClientCount += 1;
+    console.log('Fonte OBS conectada. Total:', obsClientCount);
+    socket.on('disconnect', () => {
+      obsClientCount = Math.max(0, obsClientCount - 1);
+      console.log('Fonte OBS desconectada. Total:', obsClientCount);
+    });
   }
 
   socket.emit('settings', state);
