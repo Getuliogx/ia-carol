@@ -4,7 +4,7 @@ Depois de colocar esta versão no Render/GitHub, no PC da live você não precis
 
 1. Tenha **Ollama** e **Node.js LTS** instalados uma única vez.
 2. Dê dois cliques em **`CAROL IA - INICIAR.bat`**.
-3. Pronto: o arquivo inicia o Ollama se necessário e conecta automaticamente ao serviço `https://carolia-icarolinaporto.onrender.com`.
+3. Pronto: o arquivo inicia o Ollama se necessário e conecta automaticamente ao serviço `https://ia-carol.onrender.com`.
 
 A ponte usa `OLLAMA_KEEP_ALIVE=0` para descarregar o modelo depois de cada resposta e reduzir o uso de memória quando a IA fica parada. O servidor continua lendo o chat da Twitch automaticamente com as credenciais já salvas no Render.
 
