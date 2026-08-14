@@ -111,8 +111,24 @@ A URL continua sendo:
 https://SEU-SERVICO.onrender.com/obs
 ```
 
-Na fonte navegador do OBS, use **Interagir** e clique em “ativar o áudio” se o Chromium bloquear o TTS.
+A voz do `/obs` é recebida como arquivo WAV gerado localmente pela própria ponte da Carol; o painel normal não reproduz as respostas.
 
 ## Compatibilidade
 
 A variável antiga `DEFAULT_PROFANITY_LEVEL` (0 a 4) ainda é aceita. Se `DEFAULT_PROFANITY_PERCENT` não estiver definida, ela é convertida automaticamente para porcentagem (`0=0%`, `1=25%`, `2=50%`, `3=75%`, `4=100%`).
+
+## OBS - somente avatar e voz
+
+Use uma **Fonte do navegador** com a URL:
+
+`https://ia-carol.onrender.com/obs`
+
+Sugestão de tamanho: **500 x 700** (pode redimensionar na cena).
+
+Ative **Controlar áudio via OBS / Control audio via OBS** nas propriedades da Fonte do navegador para a voz da Carol aparecer como áudio separado no Mixer, sem depender do Áudio do Desktop.
+
+A página `/obs` mostra somente o avatar em fundo transparente. Não exibe respostas em texto. Quando a Carol fala, a imagem muda para a versão de boca aberta e anima levemente.
+
+A voz não usa mais `speechSynthesis` nas respostas. A ponte local gera um WAV com a voz instalada no Windows e manda o áudio ao Render; o `/obs` toca esse WAV dentro da própria Fonte do navegador. Isso mantém a voz no Mixer do OBS quando o controle de áudio da fonte está ativado.
+
+Se o autoplay for bloqueado na primeira execução, abra **Interagir** na Fonte do navegador e clique uma vez sobre o avatar. Nada escrito aparece na live.

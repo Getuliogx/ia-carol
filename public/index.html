@@ -10,7 +10,7 @@
   <main class="app">
     <section class="card hero">
       <h1>AI Live Bot</h1>
-      <p>Chat Twitch/Kick + IA + voz Google/navegador + sentimentos + avatar.</p>
+      <p>Chat Twitch/Kick + IA + voz do avatar no OBS + sentimentos.</p>
       <div class="status" id="status">Conectando...</div>
     </section>
 
@@ -99,9 +99,7 @@
       </div>
 
       <div class="card">
-        <h2>Voz e microfone</h2>
-        <button id="loadVoices">Carregar vozes</button>
-        <select id="voiceSelect"></select>
+        <h2>Voz do avatar e microfone</h2>
         <div class="bridge-box">
           <strong>Ponte Ollama local</strong>
           <span id="bridgeStatus" class="bridge-status">Verificando...</span>
@@ -109,8 +107,7 @@
         </div>
         <button id="testOllama" type="button">Testar Ollama</button>
         <button id="testGemini" type="button">Testar Gemini</button>
-          <button id="testVoice">Testar voz neste painel</button>
-        <button id="testObsVoice" type="button">Testar voz no OBS</button>
+        <button id="testObsVoice" type="button">Testar avatar + voz no OBS</button>
         <hr>
         <button id="startMic">Escutar microfone</button>
         <button id="stopMic">Parar microfone</button>

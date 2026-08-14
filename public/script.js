@@ -99,6 +99,72 @@ let isSpeakingNow = false;
 let lastSpokenText = '';
 let lastSpokenAt = 0;
 
+let obsAudioQueue = [];
+let obsAudioPlaying = false;
+let obsCurrentAudio = null;
+
+function base64ToBlob(base64, mimeType = 'audio/wav') {
+  const binary = atob(String(base64 || ''));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
+function enqueueObsAudio(payload = {}) {
+  if (!isObs || !payload.audioBase64) return;
+  obsAudioQueue.push(payload);
+  if (obsAudioQueue.length > 4) obsAudioQueue = obsAudioQueue.slice(-4);
+  processObsAudioQueue();
+}
+
+async function processObsAudioQueue() {
+  if (!isObs || obsAudioPlaying) return;
+  const item = obsAudioQueue.shift();
+  if (!item) {
+    setTalking(false);
+    return;
+  }
+
+  let objectUrl = '';
+  try {
+    const blob = base64ToBlob(item.audioBase64, item.mimeType || 'audio/wav');
+    objectUrl = URL.createObjectURL(blob);
+    const audio = new Audio(objectUrl);
+    obsCurrentAudio = audio;
+    audio.preload = 'auto';
+    audio.volume = 1;
+
+    audio.onplay = () => {
+      obsAudioPlaying = true;
+      setTalking(true);
+    };
+    const finish = () => {
+      obsAudioPlaying = false;
+      setTalking(false);
+      obsCurrentAudio = null;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setTimeout(processObsAudioQueue, 80);
+    };
+    audio.onended = finish;
+    audio.onerror = finish;
+
+    obsAudioPlaying = true;
+    setTalking(true);
+    await audio.play();
+  } catch (err) {
+    obsAudioPlaying = false;
+    setTalking(false);
+    obsCurrentAudio = null;
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    // Se o autoplay for bloqueado, devolve uma vez para a fila. O usuário pode
+    // abrir Interagir no OBS e clicar no avatar; não aparece aviso na live.
+    if (item._retry !== true) {
+      item._retry = true;
+      obsAudioQueue.unshift(item);
+    }
+  }
+}
+
 function unlockSpeech() {
   speechUnlocked = true;
   try { speechSynthesis?.resume?.(); } catch {}
@@ -111,7 +177,7 @@ function unlockSpeech() {
     }
   } catch {}
   const u = $('audioUnlock');
-  if (u) u.style.display = 'none';
+  if (u && !isObs) u.style.display = 'none';
 }
 
 function playBeep() {
@@ -244,9 +310,17 @@ function processSpeechQueue() {
 }
 
 function setTalking(on) {
+  const avatarImage = $('avatarImage');
+  if (avatarImage) {
+    const idleSrc = avatarImage.dataset.idleSrc || '/avatar-idle.svg';
+    const talkingSrc = avatarImage.dataset.talkingSrc || '/avatar-talking.svg';
+    avatarImage.src = on ? talkingSrc : idleSrc;
+    avatarImage.classList.toggle('talking', on);
+  }
+
+  // Compatibilidade com versões antigas do avatar em CSS.
   const avatar = $('avatar');
-  if (!avatar) return;
-  avatar.classList.toggle('talking', on);
+  if (avatar) avatar.classList.toggle('talking', on);
 }
 
 async function postJSON(url, body) {
@@ -315,13 +389,16 @@ socket.on('game-event', e => logLine(`<strong>[jogo/captura]</strong>: ${e.text}
 socket.on('system-status', e => logLine(`<strong>Sistema</strong>: ${e.text}`));
 socket.on('bridge-status', e => setBridgeStatus(Boolean(e?.connected)));
 socket.on('bot-reply', payload => {
-  if ($('bubble')) {
-    $('bubble').textContent = payload.showBotText ? payload.reply : '';
-    $('bubble').style.display = payload.showBotText ? 'block' : 'none';
-  }
+  // O texto continua somente no log do painel. O /obs recebe a voz em WAV
+  // pelo evento bot-audio, sem usar speechSynthesis nem Áudio do Desktop.
   logLine(`<span class="reply"><strong>BOT</strong>: ${payload.reply}</span>`);
-  if (payload.speakEnabled !== false) speak(payload.reply, payload);
-  else logLine('<strong>Sistema</strong>: fala em voz está desativada.');
+  if (!isObs && payload.speakEnabled === false) {
+    logLine('<strong>Sistema</strong>: fala em voz está desativada.');
+  }
+});
+
+socket.on('bot-audio', payload => {
+  if (isObs) enqueueObsAudio(payload);
 });
 
 function setBridgeStatus(connected) {
@@ -419,10 +496,16 @@ window.addEventListener('load', async () => {
   });
 
   if (isObs) {
-    if ($('bubble')) $('bubble').style.display = 'none';
+    // O /obs não mostra nenhum texto. Clicar em qualquer parte do avatar via
+    // Propriedades > Interagir no OBS apenas libera o áudio, sem tocar beep ou fala de teste.
     const unlock = $('audioUnlock');
-    if (unlock) unlock.addEventListener('click', () => { unlockSpeech(); playBeep(); speak('Áudio ativado.', { emotion: 'friendly', voiceGender: currentState.voiceGender || 'auto' }); });
-    document.addEventListener('click', unlockSpeech);
-    // Não tenta falar sozinho antes do clique; isso causa mudo em algumas fontes navegador do OBS.
+    const releaseObsAudio = () => {
+      unlockSpeech();
+      try { obsCurrentAudio?.play?.(); } catch {}
+      processObsAudioQueue();
+    };
+    if (unlock) unlock.addEventListener('click', releaseObsAudio);
+    document.addEventListener('click', releaseObsAudio);
+    setTalking(false);
   }
 });

@@ -16,3 +16,57 @@
 }
 
 .range-label{display:flex;align-items:center;justify-content:space-between;gap:12px}.range-label strong{color:#a8ffbd;min-width:52px;text-align:right}input[type=range]{padding:0;height:24px;accent-color:#6c5ce7;cursor:pointer}.range-scale{display:flex;justify-content:space-between;color:#8f8fa5;font-size:11px;margin-top:2px}.bridge-box{margin-top:12px;padding:12px;border-radius:12px;background:#111118;border:1px solid #303044}.bridge-box strong{display:block;margin-bottom:7px}.bridge-status{display:inline-block;padding:5px 9px;border-radius:999px;background:#3a2d2d;color:#ffd6d6;font-size:13px}.bridge-status.ok{background:#173b27;color:#b8ffd3}
+
+/* ===== OBS: somente avatar + áudio ===== */
+.obs-body{
+  width:100vw;
+  height:100vh;
+  margin:0;
+  padding:0;
+  background:transparent!important;
+  overflow:hidden;
+}
+.obs-avatar-stage{
+  width:100vw;
+  height:100vh;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  padding:0 0 18px;
+  background:transparent;
+  cursor:default;
+  user-select:none;
+}
+.obs-avatar-image{
+  display:block;
+  width:min(420px,92vw);
+  height:auto;
+  max-height:96vh;
+  object-fit:contain;
+  transform-origin:50% 100%;
+  filter:drop-shadow(0 16px 24px rgba(0,0,0,.35));
+}
+.obs-avatar-image.talking{
+  animation:carolAvatarTalk .28s ease-in-out infinite alternate;
+}
+@keyframes carolAvatarTalk{
+  from{transform:translateY(0) scale(1)}
+  to{transform:translateY(-5px) scale(1.012)}
+}
+/* Garante que nenhum texto/aviso antigo apareça na fonte do OBS. */
+.obs-body .bubble,
+.obs-body .audio-unlock,
+.obs-body .status,
+.obs-body .log{
+  display:none!important;
+}
+/* O stage usa o id antigo audioUnlock somente como área clicável invisível. */
+.obs-body #audioUnlock.obs-avatar-stage{
+  display:flex!important;
+  position:static;
+  padding:0 0 18px;
+  border-radius:0;
+  box-shadow:none;
+  color:transparent;
+  font-size:0;
+}

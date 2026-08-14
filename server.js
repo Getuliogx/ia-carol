@@ -8,7 +8,7 @@ import tmi from 'tmi.js';
 const PORT = process.env.PORT || 3000;
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, { cors: { origin: '*' }, maxHttpBufferSize: 5e6 });
 
 // Ponte local pronta para uso: não exige configurar segredo no Render.
 // Variáveis de ambiente continuam podendo substituir os padrões quando desejado.
@@ -420,6 +420,7 @@ function buildShortPrompt(payload) {
 
 let ollamaBridgeSocket = null;
 const ollamaBridgePending = new Map();
+const ttsBridgePending = new Map();
 
 function bridgeStatus() {
   return Boolean(ollamaBridgeSocket?.connected);
@@ -451,6 +452,45 @@ async function callOllamaBridge(prompt) {
       options
     });
   });
+}
+
+async function callTtsBridge(text, payload = {}) {
+  if (!bridgeStatus()) throw new Error('Ponte local não conectada para gerar a voz');
+  const requestId = `tts-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const timeoutMs = Math.max(5000, Number(process.env.CAROL_TTS_TIMEOUT_MS || 45000));
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ttsBridgePending.delete(requestId);
+      reject(new Error(`Voz local demorou mais de ${Math.round(timeoutMs / 1000)}s`));
+    }, timeoutMs);
+    ttsBridgePending.set(requestId, { resolve, reject, timer });
+    ollamaBridgeSocket.emit('tts-generate', {
+      requestId,
+      text: String(text || '').slice(0, 420),
+      voiceGender: payload.voiceGender || state.voiceGender || 'auto',
+      emotion: payload.emotion || state.emotion || 'mixed',
+      emotionIntensity: payload.emotionIntensity ?? state.emotionIntensity ?? 75
+    });
+  });
+}
+
+async function emitObsAudio(payload) {
+  if (!payload?.speakEnabled) return;
+  try {
+    const audio = await callTtsBridge(payload.reply, payload);
+    io.emit('bot-audio', {
+      audioBase64: audio.audioBase64,
+      mimeType: audio.mimeType || 'audio/wav',
+      voiceName: audio.voiceName || '',
+      emotion: payload.emotion,
+      emotionIntensity: payload.emotionIntensity,
+      at: Date.now()
+    });
+  } catch (err) {
+    console.error('Erro gerando áudio para o OBS:', err.message);
+    io.emit('system-status', { text: `Áudio OBS indisponível: ${err.message}`, at: Date.now() });
+  }
 }
 
 async function callOllama(prompt) {
@@ -704,6 +744,7 @@ async function processMessage({ source, user, message, forced = false }) {
   };
 
   io.emit('bot-reply', payload);
+  if (payload.speakEnabled) void emitObsAudio(payload);
 
   if (state.replyInChat && source === 'twitch' && twitchClient) {
     try {
@@ -821,6 +862,7 @@ app.post('/api/speak-test', async (req, res) => {
     at: Date.now()
   };
   io.emit('bot-reply', payload);
+  void emitObsAudio(payload);
   res.json({ ok: true, payload });
 });
 
@@ -880,6 +922,24 @@ io.on('connection', socket => {
       else pending.reject(new Error(String(result?.error || 'Erro desconhecido na ponte Ollama')));
     });
 
+
+    socket.on('tts-result', result => {
+      const requestId = String(result?.requestId || '');
+      const pending = ttsBridgePending.get(requestId);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      ttsBridgePending.delete(requestId);
+      if (result?.ok) {
+        pending.resolve({
+          audioBase64: String(result.audioBase64 || ''),
+          mimeType: String(result.mimeType || 'audio/wav'),
+          voiceName: String(result.voiceName || '')
+        });
+      } else {
+        pending.reject(new Error(String(result?.error || 'Erro desconhecido no TTS local')));
+      }
+    });
+
     socket.on('disconnect', () => {
       if (ollamaBridgeSocket?.id === socket.id) ollamaBridgeSocket = null;
       console.log('Ponte Ollama local desconectada.');
@@ -889,6 +949,11 @@ io.on('connection', socket => {
         clearTimeout(pending.timer);
         pending.reject(new Error('Ponte Ollama desconectou durante a resposta'));
         ollamaBridgePending.delete(id);
+      }
+      for (const [id, pending] of ttsBridgePending) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error('Ponte local desconectou durante a voz'));
+        ttsBridgePending.delete(id);
       }
     });
     return;

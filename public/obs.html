@@ -3,22 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>AI Live Bot - OBS</title>
+  <title>Carol IA - Avatar OBS</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body class="obs-body">
-  <div id="audioUnlock" class="audio-unlock">Clique aqui no Interagir do OBS para ativar o áudio</div>
-  <div class="obs-wrap">
-    <div class="avatar" id="avatar">
-      <div class="head">
-        <div class="eye left"></div>
-        <div class="eye right"></div>
-        <div class="mouth" id="mouth"></div>
-      </div>
-      <div class="body2d"></div>
-    </div>
-    <div class="bubble" id="bubble">Aguardando chat...</div>
-  </div>
+  <main class="obs-avatar-stage" id="audioUnlock" aria-label="Carol IA">
+    <img
+      id="avatarImage"
+      class="obs-avatar-image"
+      src="/avatar-idle.svg"
+      data-idle-src="/avatar-idle.svg"
+      data-talking-src="/avatar-talking.svg"
+      alt=""
+      draggable="false"
+    />
+  </main>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/script.js"></script>
 </body>
