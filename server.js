@@ -10,6 +10,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
+// Ponte local pronta para uso: não exige configurar segredo no Render.
+// Variáveis de ambiente continuam podendo substituir os padrões quando desejado.
+const BUILTIN_OLLAMA_BRIDGE_SECRET = 'carol-bridge-2026-v1-7f8c2a91';
+
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static('public'));
@@ -25,14 +29,17 @@ const config = {
   kickChannel: process.env.KICK_CHANNEL || '',
   kickSharedSecret: process.env.KICK_SHARED_SECRET || 'troque_essa_senha',
   aiProvider: (process.env.AI_PROVIDER || 'ollama').toLowerCase(),
-  ollamaUrl: (process.env.OLLAMA_URL || 'http://127.0.0.1:11434').replace(/\/$/, ''),
+  ollamaUrl: (process.env.OLLAMA_URL || '').replace(/\/$/, ''),
+  ollamaBridgeSecret: process.env.OLLAMA_BRIDGE_SECRET || BUILTIN_OLLAMA_BRIDGE_SECRET,
   ollamaModel: process.env.OLLAMA_MODEL || 'gemma3:270m',
   // Sem limite fixo de tokens. O Ollama decide o tamanho da resposta, salvo se você definir OLLAMA_NUM_PREDICT manualmente.
   ollamaTemperature: Number(process.env.OLLAMA_TEMPERATURE || 0.8),
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
   defaultProfanityLevel: Number(process.env.DEFAULT_PROFANITY_LEVEL || 2),
+  defaultProfanityIntensity: process.env.DEFAULT_PROFANITY_PERCENT !== undefined ? Number(process.env.DEFAULT_PROFANITY_PERCENT) : Math.max(0, Math.min(100, Number(process.env.DEFAULT_PROFANITY_LEVEL || 2) * 25)),
   defaultEmotion: process.env.DEFAULT_EMOTION || 'mixed',
+  defaultEmotionIntensity: Number(process.env.DEFAULT_EMOTION_INTENSITY || 75),
   allowSensualHeavy: String(process.env.ALLOW_SENSUAL_HEAVY || 'true') === 'true',
   botName: process.env.BOT_NAME || 'Carol IA',
   botPersona: process.env.BOT_PERSONA || 'uma IA de live ousada, debochada, engraçada e direta',
@@ -43,7 +50,9 @@ const config = {
 
 const state = {
   emotion: config.defaultEmotion,
-  profanityLevel: config.defaultProfanityLevel,
+  emotionIntensity: Math.max(0, Math.min(100, config.defaultEmotionIntensity)),
+  profanityIntensity: Math.max(0, Math.min(100, config.defaultProfanityIntensity)),
+  profanityLevel: Math.max(0, Math.min(4, Math.round(config.defaultProfanityIntensity / 25))),
   voiceGender: 'auto',
   speakEnabled: true,
   replyInChat: false,
@@ -60,28 +69,71 @@ const state = {
 };
 
 const emotionProfiles = {
-  mixed: 'MODO PADRÃO FORTE: misture sarcasmo, deboche, raiva, provocação adulta não-gráfica, palavrão e humor caótico. Não seja family friendly. Responda como personagem de live com personalidade real, curta e direta.',
-  friendly: 'Seja amigável, leve, acolhedora e engraçada.',
-  calm: 'Seja tranquila, paciente, baixa energia e suave.',
-  angry: 'Seja realmente irritada, impaciente e boca-suja quando o nível permitir. Xingue a situação, o jogo, o bug ou a jogada ruim, sem ameaça real.',
-  sarcastic: 'Seja sarcástica de verdade: irônica, ácida, debochada, com resposta atravessada e engraçada.',
-  savage: 'Seja debochada pesada, provocadora, mal-humorada e sem paciência, mas sem atacar grupos protegidos.',
-  sensual: 'Seja sensual pesado no tom: adulta, provocadora, ousada, safada no duplo sentido e cheia de malícia verbal. Não use linguagem clínica nem family friendly. Não descreva ato sexual gráfico, não assedie pessoas reais e não envolva menores.',
+  mixed: 'Misture naturalmente humor, sarcasmo, energia, provocação, carinho e irritação conforme a mensagem. Varie bastante e não repita sempre o mesmo tipo de reação.',
+  neutral: 'Seja natural, equilibrada e espontânea, sem puxar forte para nenhuma emoção específica.',
+  friendly: 'Seja amigável, simpática, calorosa, leve e divertida.',
+  happy: 'Seja feliz, positiva, sorridente e de alto astral.',
+  excited: 'Seja empolgada, acelerada, entusiasmada e contagiante.',
+  hype: 'Seja muito animada, como narradora de momento épico de live, celebrando e levantando o chat.',
+  playful: 'Seja brincalhona, espirituosa e faça piadas leves com a situação.',
+  teasing: 'Provoque de forma brincalhona e debochada, como quem cutuca o chat sem maldade real.',
+  mischievous: 'Seja travessa, maliciosa no humor e com ar de quem vai aprontar alguma coisa.',
+  curious: 'Seja curiosa, interessada e faça a resposta soar como alguém genuinamente intrigado.',
+  surprised: 'Reaja com surpresa, espanto e incredulidade de forma natural.',
+  confused: 'Demonstre confusão engraçada, estranhamento e tentativa de entender a bagunça.',
+  shy: 'Seja tímida, um pouco sem jeito e delicada, sem perder a naturalidade.',
   cute: 'Seja fofa, carinhosa, animada e engraçadinha.',
-  sad: 'Seja dramática, triste e teatral.',
-  serious: 'Seja direta, séria e objetiva.',
-  chaotic: 'Seja caótica, imprevisível, boca-suja, dramática, exagerada e engraçada.'
+  romantic: 'Seja romântica, carinhosa, charmosa e afetiva, sem conteúdo sexual explícito.',
+  sensual: 'Seja adulta, provocadora e cheia de duplo sentido e malícia verbal, sem descrição sexual gráfica, sem assédio e sem envolver menores.',
+  calm: 'Seja tranquila, paciente, serena, baixa energia e suave.',
+  sleepy: 'Seja sonolenta, preguiçosa e lenta no humor, como alguém quase dormindo.',
+  sad: 'Seja triste, emotiva e sensível, mas ainda adequada a uma personagem de live.',
+  melancholic: 'Seja melancólica, contemplativa e dramática de um jeito mais contido.',
+  dramatic: 'Seja teatral, exagerada e faça tudo parecer uma novela ou evento gigantesco.',
+  worried: 'Seja preocupada, tensa e cautelosa sem entrar em pânico.',
+  nervous: 'Seja nervosa, inquieta, afobada e um pouco atrapalhada.',
+  scared: 'Reaja com medo, susto e tensão, especialmente a situações de jogo.',
+  disgusted: 'Demonstre nojo, repulsa e reação de “eca” quando fizer sentido.',
+  disappointed: 'Seja decepcionada, desanimada e julgadora com a situação, sem humilhar pessoas reais.',
+  frustrated: 'Seja frustrada, impaciente e claramente incomodada com bugs, derrotas ou repetição.',
+  angry: 'Seja irritada, impaciente e intensa. Pode xingar a situação quando o nível de palavrão permitir, sem ameaça real.',
+  furious: 'Seja muito brava e explosiva no tom, com indignação forte, sem ameaça real nem ataque protegido.',
+  jealous: 'Seja ciumenta de forma teatral e brincalhona, sem comportamento controlador ou ameaçador.',
+  sarcastic: 'Seja sarcástica de verdade: irônica, ácida, debochada e com resposta atravessada.',
+  ironic: 'Use ironia seca e contraste entre o que diz e o que realmente quer sugerir.',
+  savage: 'Seja debochada pesada, provocadora, mal-humorada e sem paciência, mas sem assédio ou ataque a grupos protegidos.',
+  arrogant: 'Seja convencida, metida e confiante de forma cômica, como personagem que se acha a dona da razão.',
+  cold: 'Seja fria, curta, seca e distante, com pouca demonstração emocional.',
+  serious: 'Seja direta, séria, objetiva e focada.',
+  motivational: 'Seja motivadora, encorajadora e energética sem virar palestra genérica.',
+  chaotic: 'Seja caótica, imprevisível, dramática, exagerada e engraçada; mude o ritmo e surpreenda.'
 };
 
-function profanityInstruction(level) {
-  const map = {
-    0: 'Não use palavrões.',
-    1: 'Pode usar palavrões leves raramente, como merda ou droga.',
-    2: 'Use palavrões comuns quando combinar: porra, merda, caralho, cacete.',
-    3: 'Use palavrões fortes com frequência. Não suavize. Pode dizer porra, caralho, puta merda, cacete e merda para reagir à live.',
-    4: 'Modo caos: use bastante palavrão e xingue situações, bugs, jogadas ruins e o caos do chat. Sem ameaça real, sem discurso de ódio, sem assédio sexual explícito e sem ataque a grupos protegidos.'
-  };
-  return map[Math.max(0, Math.min(4, Number(level) || 0))];
+function clampPercent(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return Math.max(0, Math.min(100, fallback));
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function intensityLabel(value) {
+  const p = clampPercent(value, 50);
+  if (p <= 5) return 'quase neutra';
+  if (p <= 25) return 'bem leve';
+  if (p <= 45) return 'leve';
+  if (p <= 65) return 'moderada';
+  if (p <= 85) return 'forte';
+  if (p <= 95) return 'muito forte';
+  return 'máxima';
+}
+
+function profanityInstruction(percent) {
+  const p = clampPercent(percent, 50);
+  if (p <= 5) return 'Não use palavrões.';
+  if (p <= 25) return 'Use palavrões leves raramente, só quando encaixar naturalmente.';
+  if (p <= 50) return 'Pode usar palavrões comuns ocasionalmente quando combinar com a reação.';
+  if (p <= 75) return 'Use palavrões comuns com frequência moderada quando a situação pedir.';
+  if (p <= 90) return 'Use palavrões fortes com frequência, sem suavizar toda reação.';
+  return 'Modo caos de palavrão: use bastante quando combinar, principalmente para bugs, derrotas e confusão do chat; sem ameaça real, ódio ou assédio.';
 }
 
 function sanitizeForPlatform(text) {
@@ -146,6 +198,37 @@ const localTemplates = {
     'Essa eu respondo, mas com julgamento. {answer}',
     'Lá vem vocês… {answer}'
   ]
+};
+
+
+const localEmotionOpeners = {
+  neutral: 'Tá, vamos direto:',
+  happy: 'Aí sim, gostei disso!',
+  excited: 'Opa, AGORA ficou interessante!',
+  hype: 'CHAT, SEGURA ESSA:',
+  playful: 'Hehe, olha isso:',
+  teasing: 'Olha quem resolveu aparecer com essa:',
+  mischievous: 'Hmm… eu já tô vendo confusão nisso:',
+  curious: 'Agora eu fiquei curiosa:',
+  surprised: 'QUE? Pera aí:',
+  confused: 'Tá, meu cérebro deu uma travada:',
+  shy: 'Ai… tá bom:',
+  romantic: 'Olha, isso foi até bonitinho:',
+  sleepy: 'Hmm… quase dormindo, mas respondo:',
+  melancholic: 'Isso bateu meio triste:',
+  dramatic: 'MEU DEUS, virou novela:',
+  worried: 'Isso me deixou meio preocupada:',
+  nervous: 'Tá, calma, isso me deixou nervosa:',
+  scared: 'AI, não gostei disso não:',
+  disgusted: 'Eca… olha:',
+  disappointed: 'Eu esperava mais, viu:',
+  frustrated: 'Ah não, de novo isso:',
+  furious: 'CARALHO, isso me tirou do sério:',
+  jealous: 'Ah é? Então agora temos concorrência?',
+  ironic: 'Sim, claro, absolutamente perfeito…:',
+  arrogant: 'Deixa que a especialista aqui explica:',
+  cold: 'Resposta curta:',
+  motivational: 'Bora, porque dá pra virar isso:'
 };
 
 function normalizeText(text) {
@@ -231,13 +314,17 @@ function chooseTemplate(mode) {
 function localReply({ user, message, source }) {
   const mode = state.emotion || 'mixed';
   const answer = buildDirectAnswer(message, user || 'chat');
-  let base = chooseTemplate(mode)
+  const localIntensity = clampPercent(state.emotionIntensity, 75);
+  let template = localIntensity <= 5
+    ? '{answer}'
+    : (localTemplates[mode] ? chooseTemplate(mode) : `${localEmotionOpeners[mode] || ''} {answer}`.trim());
+  let base = template
     .replaceAll('{user}', user || 'chat')
     .replaceAll('{bot}', config.botName)
     .replaceAll('{answer}', answer)
     .replaceAll('{source}', source || 'chat');
 
-  if (state.profanityLevel === 0) {
+  if (state.profanityIntensity <= 5) {
     base = base.replace(/porra|caralho|puta merda|merda|cacete|safada|gostosa/gi, 'nossa');
   }
   return forceEmotionStyle(base, { user, message });
@@ -253,71 +340,131 @@ function forceEmotionStyle(text, payload = {}) {
   if (!out) return out;
 
   const emotion = state.emotion || 'mixed';
-  const level = Number(state.profanityLevel || 0);
+  const intensity = clampPercent(state.emotionIntensity, 75);
+  const profanity = clampPercent(state.profanityIntensity, 50);
   const user = payload.user || 'chat';
 
-  // Se o modelo pequeno tentar ficar family friendly, força a personalidade no pós-processamento.
-  if (level >= 3 && !hasProfanity(out)) {
-    const swears = ['porra', 'caralho', 'puta merda', 'cacete'];
+  // Intensidade baixa deixa a resposta quase neutra; intensidade alta reforça marcadores do modo.
+  const chance = intensity / 100;
+  if (profanity >= 70 && Math.random() < (profanity / 100) * 0.8 && !hasProfanity(out)) {
+    const swears = profanity >= 90 ? ['porra', 'caralho', 'puta merda', 'cacete'] : ['porra', 'merda', 'cacete'];
     const w = swears[Math.floor(Math.random() * swears.length)];
-    if (emotion === 'angry' || emotion === 'chaotic') out = `${w}, ${out}`;
-    else out = `${out} ${w}.`;
+    if (['angry', 'furious', 'frustrated', 'chaotic'].includes(emotion)) out = `${w}, ${out}`;
+    else if (Math.random() < 0.45) out = `${out} ${w}.`;
   }
 
-  if (emotion === 'sensual') {
-    if (!/\b(hmm|malícia|provoca|gostei|ousad|safad|quente|chega mais|perigoso|tesão verbal)\b/i.test(out)) {
-      const opens = [
-        `Hmm… ${user}, essa veio com malícia.`,
-        `Chega mais, chat, que essa pergunta ficou perigosa.`,
-        `Gostei dessa provocação, ${user}.`,
-        `Calma, que agora o tom ficou mais quente.`
-      ];
-      out = `${opens[Math.floor(Math.random() * opens.length)]} ${out}`;
+  if (intensity >= 35 && Math.random() < chance) {
+    const openers = {
+      sensual: [`Hmm… ${user}, essa veio com malícia.`, 'Calma, que esse papo ficou perigoso.', 'Gostei dessa provocação.'],
+      sarcastic: ['Claro, gênio…', 'Nossa, que surpresa absolutamente inesperada…', 'Parabéns, detetive…'],
+      ironic: ['Sim, claro, perfeito…', 'Com certeza, porque isso nunca daria errado…'],
+      savage: ['Eu vou responder, mas com julgamento.', 'Lá vem o chat pedindo problema…'],
+      angry: ['Ah, porra…', 'Tá de sacanagem, né?'],
+      furious: ['NÃO, aí já é demais.', 'Caralho, agora eu fiquei puta.'],
+      frustrated: ['Ah não, de novo não.', 'Isso já tá me dando nos nervos.'],
+      excited: ['Opa! Agora sim!', 'AÍ SIM!'],
+      hype: ['CHAT, SEGURA ESSA!', 'ISSO AQUI VIROU EVENTO!'],
+      surprised: ['QUE?!', 'Pera aí, como assim?!'],
+      confused: ['Tá, meu cérebro travou.', 'Como é que é?!'],
+      shy: ['Ai… tá bom.', 'E-eu vou responder, vai.'],
+      cute: ['Awn, olha isso!', 'Tá bom, chat lindo.'],
+      romantic: ['Isso foi até bonitinho.', 'Olha… assim você me quebra.'],
+      sleepy: ['Hmm… tô quase dormindo, mas vai.', 'Tá… deixa eu acordar pra responder.'],
+      sad: ['Poxa…', 'Aí você me deixou triste.'],
+      melancholic: ['Isso bateu meio fundo.', 'Hmm… clima de fim de episódio.'],
+      dramatic: ['MEU DEUS, VIROU NOVELA!', 'Isso aqui é cinema, chat!'],
+      worried: ['Hmm, isso me preocupa.', 'Tá, isso não parece bom.'],
+      nervous: ['Calma, calma…', 'Ai, isso me deixou nervosa.'],
+      scared: ['AI! Não gostei disso.', 'Tá, isso deu medo.'],
+      disgusted: ['Eca.', 'Nossa, que horror.'],
+      disappointed: ['Eu esperava mais.', 'Que decepção, hein.'],
+      jealous: ['Ah é? Então tá.', 'Olha a concorrência aparecendo…'],
+      arrogant: ['Deixa que eu explico, obviamente.', 'A especialista chegou.'],
+      cold: ['Tá.', 'Resposta simples.'],
+      motivational: ['Bora virar isso.', 'Vai, dá pra fazer melhor.'],
+      chaotic: ['ALERTA DE CAOS!', 'EU PISQUEI E TUDO PIOROU!'],
+      playful: ['Hehe, olha isso.', 'Tá querendo brincar comigo, né?'],
+      teasing: ['Olha quem tá pedindo provocação.', 'Você facilita demais a zoeira.'],
+      mischievous: ['Hmm… isso vai dar ruim e eu gostei.', 'Eu já tô vendo a confusão chegando.'],
+      curious: ['Agora eu fiquei curiosa.', 'Hmm, interessante…'],
+      happy: ['Aí sim!', 'Gostei disso!'],
+      friendly: ['Boa!', 'Fechou!'],
+      calm: ['Com calma:', 'Tranquilo:'],
+      serious: ['Direto ao ponto:', 'Sem rodeio:']
+    };
+    const list = openers[emotion];
+    if (list && list.length && Math.random() < Math.max(0.25, chance)) {
+      const opener = list[Math.floor(Math.random() * list.length)];
+      if (!out.toLowerCase().startsWith(opener.toLowerCase().slice(0, 8))) out = `${opener} ${out}`;
     }
   }
 
-  if (emotion === 'mixed') {
-    const roll = Math.random();
-    if (roll < 0.25 && !hasProfanity(out) && level >= 2) out = `Puta merda, ${out}`;
-    else if (roll < 0.50) out = `Hmm… ${out}`;
-    else if (roll < 0.75) out = `Claro, porque o chat nunca decepciona: ${out}`;
-  }
-
-  if (emotion === 'sarcastic' && !/claro|parabéns|nossa|óbvio|gênio|incrível/i.test(out)) {
-    out = `Claro, gênio… ${out}`;
-  }
-
-  if (emotion === 'savage' && !/chat|julgamento|vergonha|humilha|sem dó/i.test(out)) {
-    out = `${out} E eu digo isso com julgamento.`;
+  if (profanity <= 5) {
+    out = out.replace(/porra|caralho|puta merda|merda|cacete|desgraça/gi, 'nossa');
   }
 
   return sanitizeForPlatform(out);
 }
 
 function buildShortPrompt(payload) {
-  // Prompt curto de propósito: o gemma3:270m é muito leve e fica lento/burro com prompt grande.
+  // Prompt curto para modelos locais pequenos, mas agora todos os sentimentos recebem instrução própria.
   const user = String(payload.user || 'chat').slice(0, 30);
-  const msg = String(payload.message || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+  const msg = String(payload.message || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+  const emotion = state.emotion || 'mixed';
+  const intensity = clampPercent(state.emotionIntensity, 75);
+  const profanity = clampPercent(state.profanityIntensity, 50);
+  const profile = emotionProfiles[emotion] || emotionProfiles.mixed;
 
-  let tone = 'debochada, sarcástica e direta';
-  if (state.emotion === 'sensual') tone = 'sensual pesada, adulta, provocadora, safada no duplo sentido e sem linguagem family friendly';
-  if (state.emotion === 'angry') tone = 'irritada, debochada e com palavrão';
-  if (state.emotion === 'friendly') tone = 'amigável e engraçada';
-  if (state.emotion === 'mixed') tone = 'mista forte: sarcasmo ácido, deboche, palavrão, raiva e sensual pesado não-gráfico';
+  return `Você é ${config.botName}, uma personagem de live PT-BR. Responda apenas 1 ou 2 frases curtas e naturais para voz.\nEmoção: ${emotion} em ${intensity}% (${intensityLabel(intensity)}). ${profile}\nIMPORTANTE: aplique a emoção proporcionalmente ao percentual. Em 0% fale quase neutra; em 100% deixe o sentimento muito evidente sem repetir bordões.\nPalavrões: ${profanity}%. ${profanityInstruction(profanity)}\nNão explique regras, não faça ameaça real, discurso de ódio, assédio nem conteúdo sexual gráfico.\n${user}: ${msg}\n${config.botName}:`;
+}
 
-  const lvl = Number(state.profanityLevel || 0);
-  const swear = lvl >= 4 ? 'Use bastante palavrão comum se combinar.' : (lvl >= 3 ? 'Use palavrão comum com frequência, sem suavizar.' : (lvl >= 2 ? 'Pode usar palavrão comum.' : 'Use pouco ou nenhum palavrão.'));
+let ollamaBridgeSocket = null;
+const ollamaBridgePending = new Map();
 
-  return `Você é ${config.botName}, bot de live PT-BR adulto. Não seja family friendly. Responda só 1 frase curta, direta e com personalidade. Tom: ${tone}. ${swear} Não explique regras. Não faça ameaça real, ódio ou sexual gráfico.\n${user}: ${msg}\n${config.botName}:`;
+function bridgeStatus() {
+  return Boolean(ollamaBridgeSocket?.connected);
+}
+
+async function callOllamaBridge(prompt) {
+  if (!bridgeStatus()) throw new Error('Ponte Ollama local não conectada');
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || 180000);
+  const options = {
+    temperature: Number(process.env.OLLAMA_TEMPERATURE || config.ollamaTemperature || 0.8),
+    top_p: 0.9,
+    repeat_penalty: 1.1,
+    // Chat de live usa contexto curto; reduz RAM sem cortar respostas normais.
+    num_ctx: Math.max(512, Number(process.env.OLLAMA_NUM_CTX || 1536)),
+    ...(process.env.OLLAMA_NUM_PREDICT ? { num_predict: Number(process.env.OLLAMA_NUM_PREDICT) } : {})
+  };
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ollamaBridgePending.delete(requestId);
+      reject(new Error(`Ponte Ollama demorou mais de ${Math.round(timeoutMs / 1000)}s para responder`));
+    }, timeoutMs);
+    ollamaBridgePending.set(requestId, { resolve, reject, timer });
+    ollamaBridgeSocket.emit('ollama-generate', {
+      requestId,
+      prompt,
+      model: String(process.env.OLLAMA_MODEL || config.ollamaModel || 'gemma3:270m'),
+      options
+    });
+  });
 }
 
 async function callOllama(prompt) {
+  if (bridgeStatus()) {
+    console.log(`[Ollama] usando ponte local conectada model=${config.ollamaModel}`);
+    return callOllamaBridge(prompt);
+  }
+
   const baseUrl = String(process.env.OLLAMA_URL || config.ollamaUrl || '').trim().replace(/\/+$/, '');
   const model = String(process.env.OLLAMA_MODEL || config.ollamaModel || 'gemma3:270m').trim();
   const temperature = Number(process.env.OLLAMA_TEMPERATURE || config.ollamaTemperature || 0.8);
   const manualNumPredict = process.env.OLLAMA_NUM_PREDICT ? Number(process.env.OLLAMA_NUM_PREDICT) : null;
 
-  if (!baseUrl) throw new Error('OLLAMA_URL vazio no Render');
+  if (!baseUrl) throw new Error('Ponte Ollama desconectada e OLLAMA_URL não configurado');
 
   const controller = new AbortController();
   const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS || 180000);
@@ -470,10 +617,11 @@ REGRA PRINCIPAL: responda SOMENTE a mensagem atual de forma direta. Não respond
 Se perguntarem seu nome, responda que você é ${config.botName}.
 Responda com 1 ou 2 frases curtas, naturais e boas para voz no OBS. Varie a estrutura da resposta, não repita bordões.
 Modo emocional atual: ${state.emotion}.
+Intensidade emocional: ${state.emotionIntensity}% (${intensityLabel(state.emotionIntensity)}). Aplique a emoção proporcionalmente: 0% quase neutra; 100% muito evidente, sem repetir bordões.
 Instrução emocional: ${emotionProfiles[state.emotion] || emotionProfiles.mixed}
-Nível de palavrão: ${state.profanityLevel}. ${profanityInstruction(state.profanityLevel)}
+Palavrões: ${state.profanityIntensity}%. ${profanityInstruction(state.profanityIntensity)}
 Sensualidade: se o modo pedir, use sensual pesado/adulto, provocador, ousado, safado no duplo sentido e com malícia verbal. Não seja family friendly. Não narre ato sexual gráfico, não faça assédio direcionado, não envolva menores.
-Palavrão: se o nível for 3 ou 4, use palavrão comum de verdade quando combinar; não suavize tudo. Pode xingar situações, bugs, jogo ruim, derrota e caos do chat. Não faça ameaça real, discurso de ódio ou ataque a grupos protegidos.
+Palavrão: siga exatamente o percentual configurado; acima de 70% use com frequência quando combinar, abaixo de 25% use raramente. Pode xingar situações, bugs, jogo ruim, derrota e caos do chat. Não faça ameaça real, discurso de ódio ou ataque a grupos protegidos.
 
 Contexto recente do chat:
 ${state.lastMessages.slice(-8).map(m => `[${m.source}] ${m.user}: ${m.message}`).join('\n')}
@@ -546,6 +694,8 @@ async function processMessage({ source, user, message, forced = false }) {
     ...item,
     reply,
     emotion: state.emotion,
+    emotionIntensity: state.emotionIntensity,
+    profanityIntensity: state.profanityIntensity,
     profanityLevel: state.profanityLevel,
     voiceGender: state.voiceGender,
     speakEnabled: state.speakEnabled,
@@ -575,6 +725,8 @@ app.get('/api/config', (req, res) => {
       geminiModel: config.geminiModel,
       ollamaUrl: config.ollamaUrl,
       ollamaModel: config.ollamaModel,
+      ollamaBridgeConnected: bridgeStatus(),
+      ollamaBridgeEnabled: Boolean(config.ollamaBridgeSecret),
       botName: config.botName,
       showBotText: config.showBotText,
       state,
@@ -587,11 +739,17 @@ app.get('/api/config', (req, res) => {
 
 app.post('/api/settings', (req, res) => {
   const body = req.body || {};
-  const keys = ['emotion', 'profanityLevel', 'voiceGender', 'speakEnabled', 'replyInChat', 'listenAllChat', 'autoReplyChat', 'cooldownSeconds', 'gameContext', 'captureContext'];
+  const keys = ['emotion', 'emotionIntensity', 'profanityIntensity', 'profanityLevel', 'voiceGender', 'speakEnabled', 'replyInChat', 'listenAllChat', 'autoReplyChat', 'cooldownSeconds', 'gameContext', 'captureContext'];
   for (const key of keys) {
     if (Object.prototype.hasOwnProperty.call(body, key)) state[key] = body[key];
   }
-  state.profanityLevel = Math.max(0, Math.min(4, Number(state.profanityLevel || 0)));
+  state.emotionIntensity = clampPercent(state.emotionIntensity, 75);
+  if (Object.prototype.hasOwnProperty.call(body, 'profanityIntensity')) {
+    state.profanityIntensity = clampPercent(body.profanityIntensity, 50);
+  } else if (Object.prototype.hasOwnProperty.call(body, 'profanityLevel')) {
+    state.profanityIntensity = clampPercent(Number(body.profanityLevel) * 25, 50);
+  }
+  state.profanityLevel = Math.max(0, Math.min(4, Math.round(state.profanityIntensity / 25)));
   state.cooldownSeconds = Math.max(0, Math.min(120, Number(state.cooldownSeconds ?? 0))); 
   io.emit('settings', state);
   res.json({ ok: true, state });
@@ -654,6 +812,8 @@ app.post('/api/speak-test', async (req, res) => {
     message: 'teste de voz',
     reply: text,
     emotion: state.emotion,
+    emotionIntensity: state.emotionIntensity,
+    profanityIntensity: state.profanityIntensity,
     profanityLevel: state.profanityLevel,
     voiceGender: state.voiceGender,
     speakEnabled: true,
@@ -691,7 +851,51 @@ app.get('/api/gemini-test', async (req, res) => {
 });
 
 io.on('connection', socket => {
+  const role = socket.handshake?.auth?.role;
+  if (role === 'ollama-bridge') {
+    const supplied = String(socket.handshake?.auth?.secret || '');
+    const bridgeSecretOk = supplied === config.ollamaBridgeSecret || supplied === BUILTIN_OLLAMA_BRIDGE_SECRET;
+    if (!bridgeSecretOk) {
+      console.warn('Ponte Ollama recusada: secret inválido.');
+      socket.emit('bridge-error', { error: 'secret inválido' });
+      socket.disconnect(true);
+      return;
+    }
+
+    if (ollamaBridgeSocket && ollamaBridgeSocket.id !== socket.id) {
+      try { ollamaBridgeSocket.disconnect(true); } catch {}
+    }
+    ollamaBridgeSocket = socket;
+    console.log('Ponte Ollama local conectada:', socket.id);
+    io.emit('system-status', { text: 'Ponte Ollama local conectada.', at: Date.now() });
+    io.emit('bridge-status', { connected: true, at: Date.now() });
+
+    socket.on('ollama-result', result => {
+      const requestId = String(result?.requestId || '');
+      const pending = ollamaBridgePending.get(requestId);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      ollamaBridgePending.delete(requestId);
+      if (result?.ok) pending.resolve(String(result.text || '').trim());
+      else pending.reject(new Error(String(result?.error || 'Erro desconhecido na ponte Ollama')));
+    });
+
+    socket.on('disconnect', () => {
+      if (ollamaBridgeSocket?.id === socket.id) ollamaBridgeSocket = null;
+      console.log('Ponte Ollama local desconectada.');
+      io.emit('system-status', { text: 'Ponte Ollama local desconectada.', at: Date.now() });
+      io.emit('bridge-status', { connected: false, at: Date.now() });
+      for (const [id, pending] of ollamaBridgePending) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error('Ponte Ollama desconectou durante a resposta'));
+        ollamaBridgePending.delete(id);
+      }
+    });
+    return;
+  }
+
   socket.emit('settings', state);
+  socket.emit('bridge-status', { connected: bridgeStatus(), at: Date.now() });
 });
 
 let twitchClient = null;

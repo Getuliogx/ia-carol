@@ -42,24 +42,55 @@ function pickVoice(gender) {
   return all[0];
 }
 
-function emotionVoiceParams(emotion) {
+function emotionVoiceParams(emotion, intensity = 75) {
   const base = { rate: 1, pitch: 1, volume: 1 };
-  const map = {
-    // Ajustes naturais: sentimentos mudam mais o texto do que a fala.
-    // Rate muito baixo parecia voz lerda no OBS/Chrome, principalmente no sensual.
-    mixed: { rate: 1.00, pitch: 1.00, volume: 1 },
-    angry: { rate: 1.08, pitch: 0.96, volume: 1 },
-    sarcastic: { rate: 1.00, pitch: 0.98, volume: 1 },
-    savage: { rate: 1.04, pitch: 0.96, volume: 1 },
-    sensual: { rate: 0.92, pitch: 0.92, volume: 1 },
-    cute: { rate: 1.03, pitch: 1.08, volume: 1 },
-    sad: { rate: 0.92, pitch: 0.95, volume: 0.9 },
-    calm: { rate: 0.96, pitch: 0.98, volume: 0.95 },
-    chaotic: { rate: 1.10, pitch: 1.02, volume: 1 },
+  const targets = {
+    mixed: { rate: 1.02, pitch: 1.00, volume: 1 },
+    neutral: base,
+    friendly: { rate: 1.02, pitch: 1.02, volume: 1 },
+    happy: { rate: 1.05, pitch: 1.05, volume: 1 },
+    excited: { rate: 1.11, pitch: 1.07, volume: 1 },
+    hype: { rate: 1.15, pitch: 1.08, volume: 1 },
+    playful: { rate: 1.06, pitch: 1.05, volume: 1 },
+    teasing: { rate: 1.02, pitch: 0.99, volume: 1 },
+    mischievous: { rate: 1.03, pitch: 0.98, volume: 1 },
+    curious: { rate: 1.03, pitch: 1.04, volume: 1 },
+    surprised: { rate: 1.10, pitch: 1.10, volume: 1 },
+    confused: { rate: 0.98, pitch: 1.02, volume: 0.98 },
+    shy: { rate: 0.96, pitch: 1.05, volume: 0.88 },
+    cute: { rate: 1.04, pitch: 1.10, volume: 1 },
+    romantic: { rate: 0.95, pitch: 0.98, volume: 0.94 },
+    sensual: { rate: 0.93, pitch: 0.93, volume: 0.96 },
+    calm: { rate: 0.95, pitch: 0.98, volume: 0.94 },
+    sleepy: { rate: 0.88, pitch: 0.94, volume: 0.82 },
+    sad: { rate: 0.91, pitch: 0.94, volume: 0.88 },
+    melancholic: { rate: 0.90, pitch: 0.93, volume: 0.86 },
+    dramatic: { rate: 1.05, pitch: 1.03, volume: 1 },
+    worried: { rate: 1.02, pitch: 1.04, volume: 0.96 },
+    nervous: { rate: 1.09, pitch: 1.06, volume: 0.97 },
+    scared: { rate: 1.12, pitch: 1.10, volume: 1 },
+    disgusted: { rate: 0.96, pitch: 0.94, volume: 0.96 },
+    disappointed: { rate: 0.93, pitch: 0.94, volume: 0.90 },
+    frustrated: { rate: 1.05, pitch: 0.97, volume: 1 },
+    angry: { rate: 1.09, pitch: 0.95, volume: 1 },
+    furious: { rate: 1.14, pitch: 0.93, volume: 1 },
+    jealous: { rate: 1.01, pitch: 0.99, volume: 0.98 },
+    sarcastic: { rate: 1.00, pitch: 0.97, volume: 1 },
+    ironic: { rate: 0.98, pitch: 0.97, volume: 0.98 },
+    savage: { rate: 1.05, pitch: 0.95, volume: 1 },
+    arrogant: { rate: 0.98, pitch: 0.96, volume: 1 },
+    cold: { rate: 0.94, pitch: 0.94, volume: 0.92 },
     serious: { rate: 0.98, pitch: 0.96, volume: 1 },
-    friendly: base
+    motivational: { rate: 1.07, pitch: 1.03, volume: 1 },
+    chaotic: { rate: 1.13, pitch: 1.04, volume: 1 }
   };
-  return map[emotion] || base;
+  const target = targets[emotion] || base;
+  const strength = Math.max(0, Math.min(100, Number(intensity) || 0)) / 100;
+  return {
+    rate: base.rate + (target.rate - base.rate) * strength,
+    pitch: base.pitch + (target.pitch - base.pitch) * strength,
+    volume: base.volume + (target.volume - base.volume) * strength
+  };
 }
 
 let speechUnlocked = false;
@@ -166,7 +197,7 @@ function processSpeechQueue() {
   utter.lang = 'pt-BR';
   const voice = pickVoice(item.payload.voiceGender || currentState.voiceGender || 'auto');
   if (voice) utter.voice = voice;
-  const params = emotionVoiceParams(item.payload.emotion || currentState.emotion || 'mixed');
+  const params = emotionVoiceParams(item.payload.emotion || currentState.emotion || 'mixed', item.payload.emotionIntensity ?? currentState.emotionIntensity ?? 75);
   utter.rate = params.rate;
   utter.pitch = params.pitch;
   utter.volume = params.volume;
@@ -226,7 +257,8 @@ async function postJSON(url, body) {
 function readControls() {
   return {
     emotion: $('emotion')?.value,
-    profanityLevel: Number($('profanityLevel')?.value ?? 2),
+    emotionIntensity: Number($('emotionIntensity')?.value ?? 75),
+    profanityIntensity: Number($('profanityIntensity')?.value ?? 50),
     voiceGender: $('voiceGender')?.value,
     speakEnabled: Boolean($('speakEnabled')?.checked),
     listenAllChat: Boolean($('listenAllChat')?.checked),
@@ -239,7 +271,10 @@ function readControls() {
 function applyState(s) {
   currentState = s || currentState;
   if ($('emotion')) $('emotion').value = currentState.emotion || 'mixed';
-  if ($('profanityLevel')) $('profanityLevel').value = currentState.profanityLevel ?? 2;
+  if ($('emotionIntensity')) $('emotionIntensity').value = currentState.emotionIntensity ?? 75;
+  if ($('emotionIntensityValue')) $('emotionIntensityValue').textContent = `${currentState.emotionIntensity ?? 75}%`;
+  if ($('profanityIntensity')) $('profanityIntensity').value = currentState.profanityIntensity ?? ((currentState.profanityLevel ?? 2) * 25);
+  if ($('profanityIntensityValue')) $('profanityIntensityValue').textContent = `${currentState.profanityIntensity ?? ((currentState.profanityLevel ?? 2) * 25)}%`;
   if ($('voiceGender')) $('voiceGender').value = currentState.voiceGender || 'auto';
   if ($('speakEnabled')) $('speakEnabled').checked = Boolean(currentState.speakEnabled);
   if ($('listenAllChat')) $('listenAllChat').checked = Boolean(currentState.listenAllChat);
@@ -278,6 +313,7 @@ socket.on('chat-message', msg => logLine(`<strong>[${msg.source}] ${msg.user}</s
 socket.on('streamer-speech', e => logLine(`<strong>[streamer]</strong>: ${e.text}`));
 socket.on('game-event', e => logLine(`<strong>[jogo/captura]</strong>: ${e.text}`));
 socket.on('system-status', e => logLine(`<strong>Sistema</strong>: ${e.text}`));
+socket.on('bridge-status', e => setBridgeStatus(Boolean(e?.connected)));
 socket.on('bot-reply', payload => {
   if ($('bubble')) {
     $('bubble').textContent = payload.showBotText ? payload.reply : '';
@@ -288,11 +324,29 @@ socket.on('bot-reply', payload => {
   else logLine('<strong>Sistema</strong>: fala em voz está desativada.');
 });
 
+function setBridgeStatus(connected) {
+  const el = $('bridgeStatus');
+  if (!el) return;
+  el.textContent = connected ? 'Conectada' : 'Desconectada';
+  el.classList.toggle('ok', connected);
+}
+
+function bindRange(id, valueId) {
+  const input = $(id);
+  const value = $(valueId);
+  if (!input || !value) return;
+  const update = () => { value.textContent = `${input.value}%`; };
+  input.addEventListener('input', update);
+  update();
+}
+
 window.addEventListener('load', async () => {
   document.addEventListener('click', unlockSpeech);
   document.addEventListener('keydown', unlockSpeech);
   document.addEventListener('touchstart', unlockSpeech);
   setTimeout(unlockSpeech, 700);
+  bindRange('emotionIntensity', 'emotionIntensityValue');
+  bindRange('profanityIntensity', 'profanityIntensityValue');
 
   if ($('obsUrl')) $('obsUrl').textContent = location.origin + '/obs';
   loadVoices();
@@ -301,10 +355,26 @@ window.addEventListener('load', async () => {
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
     applyState(cfg.publicConfig.state);
+    if (!isObs) {
+      try {
+        const saved = JSON.parse(localStorage.getItem('botPanelSettings') || 'null');
+        if (saved && typeof saved === 'object') {
+          applyState({ ...cfg.publicConfig.state, ...saved });
+          await postJSON('/api/settings', saved);
+        }
+      } catch {}
+    }
+    setBridgeStatus(Boolean(cfg.publicConfig.ollamaBridgeConnected));
     if ($('status')) {
       const ai = cfg.publicConfig.aiStatus;
       if (cfg.publicConfig.aiProvider === 'ollama') {
-        $('status').textContent = ai?.ok ? 'Ollama OK: ' + ai.lastModel : 'Ollama configurado: ' + cfg.publicConfig.ollamaModel + '. Clique em Testar Ollama. Último erro: ' + (ai?.lastError || 'nenhum');
+        if (cfg.publicConfig.ollamaBridgeConnected) {
+          $('status').textContent = ai?.ok ? 'Ponte Ollama conectada - ' + ai.lastModel : 'Ponte Ollama conectada. Clique em Testar Ollama.';
+        } else if (cfg.publicConfig.ollamaBridgeEnabled) {
+          $('status').textContent = 'Aguardando a ponte Ollama local. Inicie npm run bridge no PC do Ollama.';
+        } else {
+          $('status').textContent = ai?.ok ? 'Ollama OK: ' + ai.lastModel : 'Ollama direto configurado: ' + cfg.publicConfig.ollamaModel + '. Clique em Testar Ollama.';
+        }
       } else if (!cfg.publicConfig.hasGemini) $('status').textContent = 'Sem GEMINI_API_KEY: respostas locais';
       else if (ai?.ok) $('status').textContent = 'Gemini OK: ' + ai.lastModel;
       else $('status').textContent = 'Gemini configurado. Clique em Testar Gemini. Último erro: ' + (ai?.lastError || 'nenhum');
@@ -315,7 +385,12 @@ window.addEventListener('load', async () => {
   $('voiceSelect')?.addEventListener('change', e => { selectedVoiceName = e.target.value; localStorage.setItem('selectedVoiceName', selectedVoiceName); });
   $('testVoice')?.addEventListener('click', () => { unlockSpeech(); playBeep(); speak('Teste de voz neste painel. Se você ouviu, a voz local está funcionando.', readControls()); });
   $('testObsVoice')?.addEventListener('click', async () => { unlockSpeech(); await postJSON('/api/speak-test', { text: 'Teste de voz no OBS. Se essa fala saiu na live, o áudio da fonte navegador está funcionando.' }); logLine('<strong>Sistema</strong>: teste enviado para o OBS.'); });
-  $('saveSettings')?.addEventListener('click', async () => { await postJSON('/api/settings', readControls()); logLine('<strong>Sistema</strong>: configurações salvas.'); });
+  $('saveSettings')?.addEventListener('click', async () => {
+    const settings = readControls();
+    await postJSON('/api/settings', settings);
+    try { localStorage.setItem('botPanelSettings', JSON.stringify(settings)); } catch {}
+    logLine('<strong>Sistema</strong>: configurações salvas neste navegador e aplicadas no servidor.');
+  });
   $('saveContext')?.addEventListener('click', async () => { await postJSON('/api/settings', { gameContext: $('gameContext').value, captureContext: $('captureContext').value }); logLine('<strong>Sistema</strong>: contexto salvo.'); });
   $('forceGameReply')?.addEventListener('click', async () => { await postJSON('/api/game-event', { text: `${$('gameContext').value} ${$('captureContext').value}`, forceReply: true }); });
   $('sendTest')?.addEventListener('click', async () => { await postJSON('/api/test-message', { user: $('testUser').value, message: $('testMessage').value, source: 'teste' }); });

@@ -19,27 +19,65 @@
         <h2>Personalidade</h2>
         <label>Sentimento</label>
         <select id="emotion">
-          <option value="mixed">Misto / Todos</option>
-          <option value="friendly">Amigável</option>
-          <option value="calm">Tranquila</option>
-          <option value="angry">Raivosa</option>
-          <option value="sarcastic">Sarcástica</option>
-          <option value="savage">Debochada / Mal-humorada</option>
-          <option value="sensual">Sensual pesado</option>
-          <option value="cute">Fofa</option>
-          <option value="sad">Triste / Dramática</option>
-          <option value="serious">Séria</option>
-          <option value="chaotic">Caótica</option>
+          <optgroup label="Geral">
+            <option value="mixed">Misto / Todos</option>
+            <option value="neutral">Neutra</option>
+            <option value="friendly">Amigável</option>
+            <option value="happy">Feliz</option>
+            <option value="calm">Tranquila</option>
+            <option value="serious">Séria</option>
+            <option value="cold">Fria / Seca</option>
+          </optgroup>
+          <optgroup label="Alegria e energia">
+            <option value="excited">Empolgada</option>
+            <option value="hype">Hype / Eufórica</option>
+            <option value="playful">Brincalhona</option>
+            <option value="motivational">Motivadora</option>
+            <option value="curious">Curiosa</option>
+            <option value="surprised">Surpresa</option>
+          </optgroup>
+          <optgroup label="Fofa / social">
+            <option value="cute">Fofa</option>
+            <option value="shy">Tímida</option>
+            <option value="romantic">Romântica</option>
+            <option value="sensual">Sensual / provocadora</option>
+            <option value="teasing">Provocadora / zoeira</option>
+            <option value="mischievous">Travessa</option>
+            <option value="jealous">Ciumenta teatral</option>
+          </optgroup>
+          <optgroup label="Tristeza / tensão">
+            <option value="sad">Triste</option>
+            <option value="melancholic">Melancólica</option>
+            <option value="dramatic">Dramática</option>
+            <option value="worried">Preocupada</option>
+            <option value="nervous">Nervosa</option>
+            <option value="scared">Assustada</option>
+            <option value="sleepy">Sonolenta</option>
+          </optgroup>
+          <optgroup label="Raiva / deboche">
+            <option value="frustrated">Frustrada</option>
+            <option value="angry">Raivosa</option>
+            <option value="furious">Furiosa</option>
+            <option value="sarcastic">Sarcástica</option>
+            <option value="ironic">Irônica</option>
+            <option value="savage">Debochada / Mal-humorada</option>
+            <option value="arrogant">Arrogante</option>
+            <option value="disappointed">Decepcionada</option>
+            <option value="disgusted">Com nojo</option>
+          </optgroup>
+          <optgroup label="Outros">
+            <option value="confused">Confusa</option>
+            <option value="chaotic">Caótica</option>
+          </optgroup>
         </select>
 
-        <label>Nível de palavrão</label>
-        <select id="profanityLevel">
-          <option value="0">0 - Sem palavrão</option>
-          <option value="1">1 - Leve</option>
-          <option value="2">2 - Médio</option>
-          <option value="3">3 - Pesado</option>
-          <option value="4">4 - Caos</option>
-        </select>
+        <label class="range-label">Intensidade do sentimento <strong id="emotionIntensityValue">75%</strong></label>
+        <input id="emotionIntensity" type="range" min="0" max="100" step="1" value="75" />
+        <div class="range-scale"><span>0% neutra</span><span>50%</span><span>100% máxima</span></div>
+
+        <label class="range-label">Nível de palavrão <strong id="profanityIntensityValue">50%</strong></label>
+        <input id="profanityIntensity" type="range" min="0" max="100" step="1" value="50" />
+        <div class="range-scale"><span>0% limpo</span><span>50%</span><span>100% caos</span></div>
 
         <label>Voz</label>
         <select id="voiceGender">
@@ -64,6 +102,11 @@
         <h2>Voz e microfone</h2>
         <button id="loadVoices">Carregar vozes</button>
         <select id="voiceSelect"></select>
+        <div class="bridge-box">
+          <strong>Ponte Ollama local</strong>
+          <span id="bridgeStatus" class="bridge-status">Verificando...</span>
+          <div class="mini">Com a ponte, o PC conecta para o Render sozinho e você não precisa trocar OLLAMA_URL toda vez.</div>
+        </div>
         <button id="testOllama" type="button">Testar Ollama</button>
         <button id="testGemini" type="button">Testar Gemini</button>
           <button id="testVoice">Testar voz neste painel</button>
